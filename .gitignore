@@ -1,0 +1,86 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 虚拟环境
+venv/
+env/
+ENV/
+.venv
+
+# 数据库文件
+*.db
+*.sqlite
+*.sqlite3
+instance/
+
+# 模型文件（太大，不提交到Git）
+models/
+*.bin
+*.safetensors
+*.gguf
+*.pth
+*.pt
+*.ckpt
+
+# 敏感配置文件
+.env
+.env.local
+*.secret
+config.json
+credentials.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# 日志文件
+*.log
+logs/
+
+# 临时和生成的文件
+static/audio/
+*.wav
+*.mp3
+*.ogg
+*.flac
+cache/
+tmp/
+temp/
+
+# 测试文件
+test_*.py
+*_test.py
+
+# Claude Code 配置
+.claude/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# 系统文件
+Thumbs.db
+desktop.ini

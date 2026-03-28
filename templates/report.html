@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>诊断报告 - 元气充能陪伴平台</title>
+    <link rel="stylesheet" href="/static/css/style.css?v=4">
+    <style>
+        .report-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        .page-header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .page-header h1 {
+            font-size: 2.5rem;
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+
+        .page-header p {
+            color: #7f8c8d;
+            font-size: 1.1rem;
+        }
+
+        .filter-section {
+            background: white;
+            border-radius: 15px;
+            padding: 20px 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.08);
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .filter-label {
+            font-weight: 500;
+            color: #2c3e50;
+        }
+
+        .filter-select {
+            padding: 8px 15px;
+            border: 2px solid #ecf0f1;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            background: white;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .filter-select:hover {
+            border-color: #667eea;
+        }
+
+        .filter-select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .history-list {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .history-item {
+            background: white;
+            border-radius: 15px;
+            padding: 25px 30px;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.08);
+            transition: all 0.3s ease;
+            cursor: pointer;
+            border-left: 5px solid #667eea;
+        }
+
+        .history-item:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.12);
+        }
+
+        .history-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .history-scale {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .scale-icon {
+            font-size: 1.8rem;
+        }
+
+        .scale-info {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .scale-name {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .test-date {
+            font-size: 0.9rem;
+            color: #7f8c8d;
+        }
+
+        .history-score {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .score-badge {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 1.1rem;
+        }
+
+        .severity-badge {
+            padding: 6px 15px;
+            border-radius: 12px;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+
+        .severity-normal {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .severity-mild {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .severity-moderate {
+            background: #ffe8d1;
+            color: #d35400;
+        }
+
+        .severity-severe {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .history-recommendation {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 15px 20px;
+            margin-top: 15px;
+            border-left: 4px solid #667eea;
+        }
+
+        .recommendation-label {
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 8px;
+            font-size: 0.95rem;
+        }
+
+        .recommendation-text {
+            color: #495057;
+            line-height: 1.6;
+            font-size: 0.95rem;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 80px 20px;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.08);
+        }
+
+        .empty-icon {
+            font-size: 5rem;
+            margin-bottom: 20px;
+        }
+
+        .empty-title {
+            font-size: 1.5rem;
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+
+        .empty-desc {
+            color: #7f8c8d;
+            margin-bottom: 30px;
+        }
+
+        .btn-start {
+            padding: 15px 40px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 1.1rem;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            transition: all 0.3s ease;
+        }
+
+        .btn-start:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.95);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <!-- 统一导航栏 -->
+    <nav class="main-nav">
+        <div class="nav-container">
+            <div class="nav-logo">
+                <span class="logo-icon">🧠</span>
+                <span class="logo-text">元气充能陪伴平台</span>
+            </div>
+            <ul class="nav-menu">
+                <li class="nav-item">
+                    <a href="/scales" class="nav-link">量表评估</a>
+                </li>
+                <li class="nav-item">
+                    <a href="/chat" class="nav-link">AI对话</a>
+                </li>
+                <li class="nav-item">
+                    <a href="/trend-analysis" class="nav-link">趋势分析</a>
+                </li>
+                <li class="nav-item active">
+                    <a href="/profile" class="nav-link user-name">{{ current_user.username }}</a>
+                </li>
+                <li class="nav-item">
+                    <a href="/logout" class="nav-link nav-cta">退出</a>
+                </li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- 加载遮罩 -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner"></div>
+    </div>
+
+    <!-- 主内容 -->
+    <div class="report-container" id="mainContent" style="display: none;">
+        <div class="page-header">
+            <h1>📊 评估历史报告</h1>
+            <p>查看您所有的评估记录和专业建议</p>
+        </div>
+
+        <!-- 筛选器 -->
+        <div class="filter-section">
+            <div class="filter-group">
+                <span class="filter-label">评估类型：</span>
+                <select class="filter-select" id="scaleFilter">
+                    <option value="all">全部评估</option>
+                    <option value="comprehensive">综合评估（4量表）</option>
+                    <option value="phq9">PHQ-9 抑郁症筛查</option>
+                    <option value="abc">ABC 自闭症行为检查</option>
+                    <option value="cars">CARS 儿童自闭症评定</option>
+                    <option value="hamd">HAMD 汉密尔顿抑郁</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- 历史记录列表 -->
+        <div class="history-list" id="historyList"></div>
+    </div>
+
+    <!-- 空状态 -->
+    <div class="report-container" id="emptyState" style="display: none;">
+        <div class="empty-state">
+            <div class="empty-icon">📋</div>
+            <div class="empty-title">暂无评估记录</div>
+            <div class="empty-desc">完成评估后，您可以在这里查看所有的评估记录和专业建议</div>
+            <a href="/scales" class="btn-start">开始评估</a>
+        </div>
+    </div>
+
+    <script>
+        let allHistory = [];
+        let originalHistory = []; // 保存原始数据用于筛选
+
+        document.addEventListener('DOMContentLoaded', async function() {
+            await loadHistory();
+            setupFilters();
+        });
+
+        async function loadHistory() {
+            document.getElementById('loadingOverlay').style.display = 'flex';
+
+            try {
+                const response = await fetch('/api/user/history?limit=100');
+                if (!response.ok) {
+                    throw new Error('获取历史记录失败');
+                }
+
+                const data = await response.json();
+                const history = data.history || [];
+
+                // 合并综合评估记录
+                const mergedHistory = mergeComprehensiveResults(history);
+                allHistory = mergedHistory;
+                originalHistory = mergedHistory; // 保存合并后的数据
+
+                if (allHistory.length === 0) {
+                    showEmptyState();
+                } else {
+                    showMainContent();
+                    displayHistory(allHistory);
+                }
+            } catch (error) {
+                console.error('加载历史记录失败:', error);
+                alert('加载历史记录失败，请稍后重试');
+            } finally {
+                document.getElementById('loadingOverlay').style.display = 'none';
+            }
+        }
+
+        function mergeComprehensiveResults(history) {
+            const resultGroups = {};
+
+            history.forEach(item => {
+                if (item.assessment_type === 'comprehensive') {
+                    // 综合评估：按result_id分组
+                    if (!resultGroups[item.result_id]) {
+                        resultGroups[item.result_id] = {
+                            type: 'comprehensive',
+                            result_id: item.result_id,
+                            created_at: item.created_at,
+                            scales: []
+                        };
+                    }
+                    resultGroups[item.result_id].scales.push(item);
+                } else {
+                    // 单独评估：每条单独显示
+                    const uniqueKey = `single_${item.result_id}`;
+                    resultGroups[uniqueKey] = {
+                        type: 'single',
+                        ...item
+                    };
+                }
+            });
+
+            // 转换为数组并按时间排序
+            const mergedArray = Object.values(resultGroups).sort((a, b) => {
+                return new Date(b.created_at) - new Date(a.created_at);
+            });
+
+            return mergedArray;
+        }
+
+        function showEmptyState() {
+            document.getElementById('mainContent').style.display = 'none';
+            document.getElementById('emptyState').style.display = 'block';
+        }
+
+        function showMainContent() {
+            document.getElementById('mainContent').style.display = 'block';
+            document.getElementById('emptyState').style.display = 'none';
+        }
+
+        function setupFilters() {
+            const scaleFilter = document.getElementById('scaleFilter');
+            scaleFilter.addEventListener('change', function() {
+                const selectedScale = this.value;
+                if (selectedScale === 'all') {
+                    displayHistory(allHistory);
+                } else if (selectedScale === 'comprehensive') {
+                    // 只显示综合评估
+                    const filtered = allHistory.filter(item => item.type === 'comprehensive');
+                    displayHistory(filtered);
+                } else {
+                    // 显示特定量表的单独评估
+                    const filtered = allHistory.filter(item =>
+                        item.type === 'single' && item.scale_id === selectedScale
+                    );
+                    displayHistory(filtered);
+                }
+            });
+        }
+
+        function displayHistory(history) {
+            const historyList = document.getElementById('historyList');
+            historyList.innerHTML = '';
+
+            if (history.length === 0) {
+                historyList.innerHTML = `
+                    <div style="text-align: center; padding: 40px; color: #7f8c8d;">
+                        没有找到符合条件的记录
+                    </div>
+                `;
+                return;
+            }
+
+            history.forEach(item => {
+                const div = document.createElement('div');
+
+                if (item.type === 'comprehensive') {
+                    // 综合评估卡片
+                    div.className = 'history-item';
+                    div.style.borderLeft = '5px solid #764ba2';
+                    div.onclick = function() {
+                        window.location.href = `/scale/comprehensive-result/${item.result_id}`;
+                    };
+
+                    const date = new Date(item.created_at).toLocaleString('zh-CN');
+
+                    div.innerHTML = `
+                        <div class="history-header">
+                            <div class="history-scale">
+                                <div class="scale-icon">📊</div>
+                                <div class="scale-info">
+                                    <div class="scale-name">综合心理评估</div>
+                                    <div class="test-date">📅 ${date}</div>
+                                </div>
+                            </div>
+                            <div class="history-score">
+                                <div class="score-badge" style="background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);">4个量表</div>
+                            </div>
+                        </div>
+                        <div style="margin: 15px 0;">
+                            <div style="font-size: 0.9rem; color: #7f8c8d; margin-bottom: 10px;">包含以下量表的评估结果：</div>
+                            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+                                ${item.scales.map(scale => {
+                                    let severityClass = 'severity-normal';
+                                    if (scale.level === 'mild' || scale.level === 'mild_moderate') {
+                                        severityClass = 'severity-mild';
+                                    } else if (scale.level === 'moderate') {
+                                        severityClass = 'severity-moderate';
+                                    } else if (scale.level === 'moderately_severe' || scale.level === 'severe') {
+                                        severityClass = 'severity-severe';
+                                    }
+                                    return `
+                                        <div style="background: #f8f9fa; padding: 10px 15px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center;">
+                                            <span style="font-size: 0.9rem;">${scale.scale_icon} ${scale.scale_name}</span>
+                                            <span style="font-size: 0.85rem; color: #7f8c8d;">${scale.score}/${scale.max_score}</span>
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>
+                        </div>
+                        <div class="history-recommendation">
+                            <div class="recommendation-label">💡 专业建议</div>
+                            <div class="recommendation-text">点击查看完整的综合分析报告，包含所有量表的详细评估和总体建议。</div>
+                        </div>
+                    `;
+                } else {
+                    // 单独评估卡片
+                    div.className = 'history-item';
+                    div.onclick = function() {
+                        window.location.href = `/scale/result/${item.result_id}`;
+                    };
+
+                    const date = new Date(item.created_at).toLocaleString('zh-CN');
+
+                    // 严重程度样式
+                    let severityClass = 'severity-normal';
+                    if (item.level === 'mild' || item.level === 'mild_moderate') {
+                        severityClass = 'severity-mild';
+                    } else if (item.level === 'moderate') {
+                        severityClass = 'severity-moderate';
+                    } else if (item.level === 'moderately_severe' || item.level === 'severe') {
+                        severityClass = 'severity-severe';
+                    }
+
+                    div.innerHTML = `
+                        <div class="history-header">
+                            <div class="history-scale">
+                                <div class="scale-icon">${item.scale_icon}</div>
+                                <div class="scale-info">
+                                    <div class="scale-name">${item.scale_name}</div>
+                                    <div class="test-date">📅 ${date}</div>
+                                </div>
+                            </div>
+                            <div class="history-score">
+                                <div class="score-badge">${item.score}/${item.max_score}</div>
+                                <div class="severity-badge ${severityClass}">${item.severity}</div>
+                            </div>
+                        </div>
+                        ${item.recommendation ? `
+                            <div class="history-recommendation">
+                                <div class="recommendation-label">💡 专业建议</div>
+                                <div class="recommendation-text">${item.recommendation}</div>
+                            </div>
+                        ` : ''}
+                    `;
+                }
+
+                historyList.appendChild(div);
+            });
+        }
+    </script>
+</body>
+</html>

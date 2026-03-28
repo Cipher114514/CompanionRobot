@@ -1,0 +1,9 @@
+[
+  {
+    "name": "全国心理援助热线",
+    "contact": "400-161-9995",
+    "hours": "24小时",
+    "type": "hotline",
+    "priority": 1
+  }
+]

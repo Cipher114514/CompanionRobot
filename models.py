@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-数据库模型
+数据库模型 - 精简版（移除量表相关）
 """
 
 from flask_sqlalchemy import SQLAlchemy
@@ -19,12 +19,15 @@ class User(UserMixin, db.Model):
     username = db.Column(db.String(80), unique=True, nullable=False, index=True)
     email = db.Column(db.String(120), unique=True, nullable=False, index=True)
     password_hash = db.Column(db.String(255), nullable=False)
+
+    # 用户角色: 'patient' (患者/普通用户) 或 'counselor' (心理咨询师)
+    role = db.Column(db.String(20), nullable=False, default='patient', index=True)
+
+    # 出生日期 (仅对患者)
+    birth_date = db.Column(db.Date, nullable=True)
+
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     last_login = db.Column(db.DateTime)
-
-    # 关联的评估结果
-    assessment_results = db.relationship('AssessmentResult', backref='user', lazy='dynamic',
-                                        cascade='all, delete-orphan')
 
     def set_password(self, password):
         """设置密码哈希"""
@@ -34,8 +37,16 @@ class User(UserMixin, db.Model):
         """验证密码"""
         return check_password_hash(self.password_hash, password)
 
+    def is_patient(self):
+        """是否是患者"""
+        return self.role == 'patient'
+
+    def is_counselor(self):
+        """是否是心理咨询师"""
+        return self.role == 'counselor'
+
     def __repr__(self):
-        return f'<User {self.username}>'
+        return f'<User {self.username} ({self.role})>'
 
     def to_dict(self):
         """转换为字典"""
@@ -43,52 +54,10 @@ class User(UserMixin, db.Model):
             'id': self.id,
             'username': self.username,
             'email': self.email,
+            'role': self.role,
+            'birth_date': self.birth_date.isoformat() if self.birth_date else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'last_login': self.last_login.isoformat() if self.last_login else None
-        }
-
-
-class AssessmentResult(db.Model):
-    """评估结果模型"""
-    __tablename__ = 'assessment_results'
-
-    id = db.Column(db.Integer, primary_key=True)
-    result_id = db.Column(db.String(100), unique=True, nullable=False, index=True)
-
-    # 用户关联
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
-
-    # 评估类型
-    assessment_type = db.Column(db.String(20), nullable=False)  # 'single' 或 'comprehensive'
-
-    # 评估结果数据（JSON格式存储）
-    results_data = db.Column(db.Text, nullable=False)  # JSON字符串
-
-    # 时间戳
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
-
-    def __repr__(self):
-        return f'<AssessmentResult {self.result_id}>'
-
-    def get_results(self):
-        """获取解析后的结果数据"""
-        import json
-        return json.loads(self.results_data)
-
-    def set_results(self, data):
-        """设置结果数据（转换为JSON）"""
-        import json
-        self.results_data = json.dumps(data, ensure_ascii=False)
-
-    def to_dict(self):
-        """转换为字典"""
-        return {
-            'id': self.id,
-            'result_id': self.result_id,
-            'user_id': self.user_id,
-            'assessment_type': self.assessment_type,
-            'results': self.get_results(),
-            'created_at': self.created_at.isoformat() if self.created_at else None
         }
 
 
@@ -131,7 +100,7 @@ class ChatMessage(db.Model):
     confidence = db.Column(db.Float, default=0.0)
 
     # 危机干预标记
-    is_crisis_response = db.Column(db.Boolean, default=False, nullable=False)  # 是否为危机干预回复
+    is_crisis_response = db.Column(db.Boolean, default=False, nullable=False)
 
     # 时间戳
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
@@ -248,101 +217,86 @@ class ConversationFeedback(db.Model):
         return f'<ConversationFeedback {self.id} - {self.feedback_type}>'
 
 
-class UserStrategyProfile(db.Model):
-    """用户策略画像表 - 存储个性化疗愈策略"""
-    __tablename__ = 'user_strategy_profiles'
+class CounselorNote(db.Model):
+    """咨询师建议/留言表"""
+    __tablename__ = 'counselor_notes'
 
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, unique=True, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    counselor_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
 
-    # 用户画像数据（JSON格式）
-    depression_level = db.Column(db.String(50))  # 抑郁程度
-    trend_status = db.Column(db.String(50))  # 趋势状态
-    preferred_style = db.Column(db.String(50))  # 首选对话风格
+    # 建议类型
+    note_type = db.Column(db.String(50), nullable=False)  # 'suggestion', 'observation', 'warning', 'encouragement'
 
-    # 画像完整数据
-    profile_data = db.Column(db.Text)  # 完整画像JSON
+    # 建议内容
+    note = db.Column(db.Text, nullable=False)
+
+    # 是否已读（用户端）
+    is_read = db.Column(db.Boolean, default=False, nullable=False)
 
     # 时间戳
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # 关联
-    user = db.relationship('User', backref=db.backref('strategy_profile', uselist=False,
-                                                       cascade='all, delete-orphan'))
-
-    def get_profile(self):
-        """获取解析后的画像数据"""
-        import json
-        return json.loads(self.profile_data) if self.profile_data else {}
-
-    def set_profile(self, data):
-        """设置画像数据（转换为JSON）"""
-        import json
-        self.profile_data = json.dumps(data, ensure_ascii=False)
+    user = db.relationship('User', foreign_keys=[user_id],
+                          backref=db.backref('received_notes', lazy='dynamic',
+                                            cascade='all, delete-orphan'))
+    counselor = db.relationship('User', foreign_keys=[counselor_id],
+                               backref=db.backref('sent_notes', lazy='dynamic',
+                                                 cascade='all, delete-orphan'))
 
     def to_dict(self):
         """转换为字典"""
         return {
             'id': self.id,
             'user_id': self.user_id,
-            'depression_level': self.depression_level,
-            'trend_status': self.trend_status,
-            'preferred_style': self.preferred_style,
-            'profile': self.get_profile(),
+            'counselor_id': self.counselor_id,
+            'counselor_name': self.counselor.username if self.counselor else None,
+            'note_type': self.note_type,
+            'note': self.note,
+            'is_read': self.is_read,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
 
     def __repr__(self):
-        return f'<UserStrategyProfile {self.user_id} - {self.preferred_style}>'
+        return f'<CounselorNote {self.id} - {self.note_type}>'
 
 
-class StrategyUsageLog(db.Model):
-    """策略使用日志表 - 记录每次对话使用的策略"""
-    __tablename__ = 'strategy_usage_logs'
+class CounselorViewRecord(db.Model):
+    """咨询师查看用户记录"""
+    __tablename__ = 'counselor_view_records'
 
     id = db.Column(db.Integer, primary_key=True)
+    counselor_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
-    chat_message_id = db.Column(db.Integer, db.ForeignKey('chat_messages.id'), nullable=False, index=True)
 
-    # 使用的策略
-    strategy_type = db.Column(db.String(50), nullable=False)  # 'empathetic', 'guidance', 'solution_focused'
-    strategy_name = db.Column(db.String(50), nullable=False)  # '共情型', '指导型', '解决型'
-
-    # 策略上下文
-    user_emotion = db.Column(db.String(20))  # 当时用户情绪
-    depression_level = db.Column(db.String(50))  # 当时抑郁程度
-
-    # 效果追踪（如果有反馈）
-    feedback_received = db.Column(db.Boolean, default=False)
-    feedback_type = db.Column(db.String(10))  # 'positive', 'negative'
+    # 查看详情
+    view_duration = db.Column(db.Integer, default=0)  # 查看时长（秒）
 
     # 时间戳
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    viewed_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
     # 关联
-    user = db.relationship('User', backref=db.backref('strategy_logs', lazy='dynamic',
-                                                       cascade='all, delete-orphan'))
-    chat_message = db.relationship('ChatMessage', backref=db.backref('strategy_log', uselist=False))
+    counselor = db.relationship('User', foreign_keys=[counselor_id],
+                               backref=db.backref('view_records', lazy='dynamic',
+                                                 cascade='all, delete-orphan'))
+    user = db.relationship('User', foreign_keys=[user_id],
+                          backref=db.backref('been_viewed_records', lazy='dynamic'))
 
     def to_dict(self):
         """转换为字典"""
         return {
             'id': self.id,
+            'counselor_id': self.counselor_id,
             'user_id': self.user_id,
-            'chat_message_id': self.chat_message_id,
-            'strategy_type': self.strategy_type,
-            'strategy_name': self.strategy_name,
-            'user_emotion': self.user_emotion,
-            'depression_level': self.depression_level,
-            'feedback_received': self.feedback_received,
-            'feedback_type': self.feedback_type,
-            'created_at': self.created_at.isoformat() if self.created_at else None
+            'view_duration': self.view_duration,
+            'viewed_at': self.viewed_at.isoformat() if self.viewed_at else None
         }
 
     def __repr__(self):
-        return f'<StrategyUsageLog {self.id} - {self.strategy_name}>'
+        return f'<CounselorViewRecord counselor:{self.counselor_id} -> user:{self.user_id}>'
 
 
 def init_db(app):

@@ -48,7 +48,7 @@
             font-size: 0.9rem;
         }
 
-        .form-group input {
+        .form-group input, .form-group select {
             width: 100%;
             padding: 12px 14px;
             border: 1px solid #e0e0e0;
@@ -58,7 +58,7 @@
             background: white;
         }
 
-        .form-group input:focus {
+        .form-group input:focus, .form-group select:focus {
             outline: none;
             border-color: #999;
         }
@@ -70,12 +70,53 @@
             display: none;
         }
 
-        .form-group.error input {
+        .form-group.error input, .form-group.error select {
             border-color: #c53030;
         }
 
         .form-group.error .error-message {
             display: block;
+        }
+
+        .role-selection {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .role-option {
+            flex: 1;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.2s;
+        }
+
+        .role-option:hover {
+            border-color: #999;
+        }
+
+        .role-option.selected {
+            border-color: #000;
+            background: #f5f5f5;
+        }
+
+        .role-option input {
+            display: none;
+        }
+
+        .role-option-label {
+            display: block;
+            font-weight: 500;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .role-option-desc {
+            font-size: 0.8rem;
+            color: #666;
         }
 
         .btn-submit {
@@ -161,6 +202,10 @@
             margin-top: 5px;
             color: #666;
         }
+
+        .hidden {
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -176,6 +221,23 @@
             <div class="alert alert-error" id="errorAlert"></div>
 
             <form id="registerForm" onsubmit="return false;">
+                <!-- 角色选择 -->
+                <div class="form-group">
+                    <label>选择您的身份</label>
+                    <div class="role-selection">
+                        <label class="role-option selected" id="patientOption">
+                            <input type="radio" name="role" value="patient" checked>
+                            <span class="role-option-label">患者</span>
+                            <span class="role-option-desc">寻求心理咨询帮助</span>
+                        </label>
+                        <label class="role-option" id="counselorOption">
+                            <input type="radio" name="role" value="counselor">
+                            <span class="role-option-label">心理咨询师</span>
+                            <span class="role-option-desc">查看患者信息</span>
+                        </label>
+                    </div>
+                </div>
+
                 <div class="form-group">
                     <label for="username">用户名</label>
                     <input type="text" id="username" name="username" required
@@ -210,6 +272,13 @@
                     <div class="error-message"></div>
                 </div>
 
+                <!-- 患者需要填写出生日期 -->
+                <div class="form-group" id="birthDateGroup">
+                    <label for="birthDate">出生日期</label>
+                    <input type="date" id="birthDate" name="birthDate" required>
+                    <div class="error-message"></div>
+                </div>
+
                 <button type="submit" class="btn-submit" id="submitBtn">注册</button>
             </form>
 
@@ -223,6 +292,30 @@
         const form = document.getElementById('registerForm');
         const passwordInput = document.getElementById('password');
         const confirmInput = document.getElementById('confirmPassword');
+        const birthDateGroup = document.getElementById('birthDateGroup');
+        const birthDateInput = document.getElementById('birthDate');
+        const roleInputs = document.querySelectorAll('input[name="role"]');
+
+        // 角色切换
+        roleInputs.forEach(input => {
+            input.addEventListener('change', function() {
+                // 更新选中样式
+                document.querySelectorAll('.role-option').forEach(option => {
+                    option.classList.remove('selected');
+                });
+                this.closest('.role-option').classList.add('selected');
+
+                // 患者需要填写出生日期
+                if (this.value === 'patient') {
+                    birthDateGroup.classList.remove('hidden');
+                    birthDateInput.required = true;
+                } else {
+                    birthDateGroup.classList.add('hidden');
+                    birthDateInput.required = false;
+                    birthDateInput.value = '';
+                }
+            });
+        });
 
         // 密码强度检测
         passwordInput.addEventListener('input', function() {
@@ -260,7 +353,8 @@
             // 清除之前的错误
             document.querySelectorAll('.form-group').forEach(group => {
                 group.classList.remove('error');
-                group.querySelector('.error-message').textContent = '';
+                const errorMsg = group.querySelector('.error-message');
+                if (errorMsg) errorMsg.textContent = '';
             });
             hideAlerts();
 
@@ -273,6 +367,19 @@
                 showError(confirmInput, '两次输入的密码不一致');
                 return;
             }
+
+            // 验证患者必须填写出生日期
+            if (data.role === 'patient' && !data.birthDate) {
+                showError(birthDateInput, '请填写出生日期');
+                return;
+            }
+
+            // 转换字段名以匹配后端API
+            if (data.birthDate) {
+                data.birth_date = data.birthDate;
+                delete data.birthDate;
+            }
+            delete data.confirmPassword;
 
             // 禁用提交按钮
             const submitBtn = document.getElementById('submitBtn');

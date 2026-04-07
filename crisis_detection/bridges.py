@@ -30,49 +30,17 @@ class EmotionBridge:
 
 class ScaleBridge:
     """量表模块桥接"""
-    
+
     @staticmethod
     def get_latest_scores(user_id: int) -> Optional[dict]:
         """
         获取用户最新量表分数
 
-        调用现有 assessment_scales 和数据库模型
-        返回：{"PHQ-9": 15, "GAD-7": 10, "created_at": "..."}
+        注意：量表功能已移除，返回None
         """
-        try:
-            from models import AssessmentResult
-            from sqlalchemy import desc
-
-            # 获取最近的评估记录
-            latest = AssessmentResult.query.filter_by(user_id=user_id)\
-                .order_by(desc(AssessmentResult.created_at))\
-                .first()
-
-            if not latest:
-                return None
-
-            result_data = latest.get_results()
-            scores = {}
-
-            # 提取 PHQ-9 分数
-            if latest.assessment_type == 'single':
-                scale_id = result_data.get('scale_id', '')
-                if 'PHQ' in scale_id or 'phq' in scale_id:
-                    scores['PHQ-9'] = result_data.get('result', {}).get('total_score', 0)
-                elif 'GAD' in scale_id or 'gad' in scale_id:
-                    scores['GAD-7'] = result_data.get('result', {}).get('total_score', 0)
-            elif latest.assessment_type == 'comprehensive':
-                for scale_result in result_data.get('results', []):
-                    scale_id = scale_result.get('scale_id', '')
-                    if 'PHQ' in scale_id or 'phq' in scale_id:
-                        scores['PHQ-9'] = scale_result.get('total_score', 0)
-                    elif 'GAD' in scale_id or 'gad' in scale_id:
-                        scores['GAD-7'] = scale_result.get('total_score', 0)
-
-            return scores if scores else None
-        except Exception as e:
-            logger.warning(f"获取量表分数失败：{e}")
-            return None
+        # 量表功能已移除，返回None
+        logger.warning("量表功能已移除")
+        return None
 
 
 class VoiceBridge:

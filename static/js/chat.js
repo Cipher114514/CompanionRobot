@@ -919,6 +919,17 @@ async function sendAudio(audioBlob) {
                 return;
             }
 
+            // 准备聊天请求数据
+            const chatRequestData = {
+                message: data.text
+            };
+
+            // 如果有语音情绪数据，传递给聊天API
+            if (data.voice_emotion) {
+                chatRequestData.voice_emotion = data.voice_emotion;
+                console.log('语音情绪分析:', data.voice_emotion);
+            }
+
             // 直接调用聊天API（而不是通过sendMessage，避免重复添加消息）
             try {
                 const chatResponse = await fetch('/api/chat', {
@@ -926,7 +937,7 @@ async function sendAudio(audioBlob) {
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ message: data.text })
+                    body: JSON.stringify(chatRequestData)
                 });
 
                 const chatData = await chatResponse.json();
@@ -935,6 +946,15 @@ async function sendAudio(audioBlob) {
                     // 成功后才添加用户消息和AI回复
                     addMessage(data.text, 'user');
                     addMessage(chatData.response, 'bot', chatData.chat_message_id);
+
+                    // 显示情绪分析结果
+                    if (chatData.emotion_method) {
+                        console.log(`情绪分析方式: ${chatData.emotion_method}`);
+                        if (chatData.emotion_method === 'multimodal_fusion' && chatData.emotion_details) {
+                            console.log(`文字情绪: ${chatData.emotion_details.text_emotion}, 语音情绪: ${chatData.emotion_details.voice_emotion}`);
+                            console.log(`融合权重 - 文字: ${chatData.emotion_details.text_weight}, 语音: ${chatData.emotion_details.voice_weight}`);
+                        }
+                    }
 
                     // 根据情绪更新机器人状态
                     if (chatData.emotion === 'positive') {

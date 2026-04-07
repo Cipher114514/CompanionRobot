@@ -1,12 +1,13 @@
 """
 元气充能陪伴平台 - Flask版本
-直接使用HTML/CSS/JavaScript，避免Gradio兼容性问题
+精简版：移除量表功能，简化对话系统
+支持患者和心理咨询师两种角色
 """
 
 from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, send_file
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import os
 import csv
 import io
@@ -16,23 +17,41 @@ import json
 from mindchat_dialogue import IntegratedMindChatSystem
 from whisper_asr import WhisperASRManager
 from voice_module import VoiceTTS
-from assessment_scales import ScaleManager
+
+# 导入语音情绪识别模块（使用轻量级版本）
+from voice_emotion_lightweight import init_lightweight_voice_emotion_recognizer
 
 # 导入危机检测模块
 from crisis_detection import CrisisDetector, CrisisResponder, CrisisStorage
 
+# 导入模块化报告生成器
+from modular_report_library import ModularReportGenerator
+
+# 导入优化提示词生成器
+from optimized_prompt_generator import (
+    generate_prompt_with_memory,
+    save_message_to_memory
+)
+
+# 导入统一配置
+from config import (
+    AppConfig, ModelConfig, VoiceConfig,
+    ReportConfig, CrisisConfig, MediaConfig, PromptConfig,
+    PerformanceConfig, LoggingConfig, PrivacyConfig, FeatureFlags,
+    validate_config, create_missing_directories
+)
+
 # 导入数据库模型
-from models import (db, User, AssessmentResult, ChatMessage, SentimentAnalysis,
-                    ConversationFeedback, UserStrategyProfile, StrategyUsageLog, init_db)
+from models import db, User, ChatMessage, SentimentAnalysis, ConversationFeedback, init_db
 
 app = Flask(__name__)
 
 # 配置
 app.config.update(
-    SECRET_KEY='your-secret-key-change-this-in-production',
-    SQLALCHEMY_DATABASE_URI='sqlite:///mental_health.db',
-    SQLALCHEMY_TRACK_MODIFICATIONS=False,
-    PERMANENT_SESSION_LIFETIME=timedelta(days=7),
+    SECRET_KEY=AppConfig.SECRET_KEY,
+    SQLALCHEMY_DATABASE_URI=AppConfig.SQLALCHEMY_DATABASE_URI,
+    SQLALCHEMY_TRACK_MODIFICATIONS=AppConfig.SQLALCHEMY_TRACK_MODIFICATIONS,
+    PERMANENT_SESSION_LIFETIME=timedelta(days=AppConfig.PERMANENT_SESSION_LIFETIME_DAYS),
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE='Lax'
 )
@@ -53,12 +72,14 @@ asr_system = None
 sentiment_pipeline = None
 tts_system = None
 multimodal_analyzer = None
+ser_system = None  # 语音情绪识别系统
 crisis_detector = None
 crisis_responder = None
 crisis_storage = None
+modular_report_generator = None  # 模块化报告生成器
 
-# 创建静态音频目录
-AUDIO_DIR = os.path.join(os.path.dirname(__file__), 'static', 'audio')
+# 创建静态音频目录（使用统一配置）
+AUDIO_DIR = VoiceConfig.AUDIO_DIR
 if not os.path.exists(AUDIO_DIR):
     os.makedirs(AUDIO_DIR)
 
@@ -69,10 +90,54 @@ def load_user(user_id):
     return User.query.get(int(user_id))
 
 
+def calculate_age(birth_date):
+    """计算年龄（基于出生日期）"""
+    if birth_date is None:
+        return None
+
+    today = date.today()
+    age = today.year - birth_date.year
+
+    # 如果今年还没过生日，年龄减1
+    if (today.month, today.day) < (birth_date.month, birth_date.day):
+        age -= 1
+
+    return age
+
+
+def get_report_level(user):
+    """
+    根据用户年龄确定报告级别
+
+    Args:
+        user: User对象
+
+    Returns:
+        报告级别字符串: "none", "child", "teen", "adult"
+    """
+    if not user or not user.birth_date:
+        return "adult"  # 默认成年人级别
+
+    age = calculate_age(user.birth_date)
+
+    if age is None:
+        return "adult"
+
+    # 根据年龄确定报告级别（基于认知发展理论）
+    if age < ReportConfig.MIN_REPORT_AGE_CHILD:
+        return "none"  # 不展示报告
+    elif age < ReportConfig.MIN_REPORT_AGE_TEEN:
+        return "child"  # 儿童简化报告
+    elif age < ReportConfig.MIN_REPORT_AGE_ADULT:
+        return "teen"   # 青少年适配报告
+    else:
+        return "adult"  # 成人完整报告
+
+
 def initialize_models():
     """初始化所有模型"""
-    global mindchat_system, asr_system, sentiment_pipeline, tts_system, multimodal_analyzer
-    global crisis_detector, crisis_responder, crisis_storage
+    global mindchat_system, asr_system, sentiment_pipeline, tts_system, multimodal_analyzer, ser_system
+    global crisis_detector, crisis_responder, crisis_storage, modular_report_generator
 
     print("=" * 60)
     print("初始化元气充能陪伴平台...".center(60))
@@ -112,7 +177,20 @@ def initialize_models():
     except Exception as e:
         print(f"[ERROR] TTS 加载失败: {e}")
 
-    # 5. 多模态情绪分析
+    # 5. 语音情绪识别 (SER) - 基于音频特征的轻量级模型
+    if VoiceConfig.ENABLE_VOICE_EMOTION:
+        try:
+            ser_system = init_lightweight_voice_emotion_recognizer()
+            if ser_system and ser_system.loaded:
+                print("[OK] 语音情绪识别系统加载成功 (轻量级特征模型)")
+            else:
+                print("[WARNING] 语音情绪识别加载失败，将使用基于规则的分析")
+                ser_system = None
+        except Exception as e:
+            print(f"[ERROR] 语音情绪识别加载失败: {e}")
+            ser_system = None
+
+    # 6. 多模态情绪分析
     try:
         from multimodal_sentiment import create_multimodal_analyzer
         multimodal_analyzer = create_multimodal_analyzer(use_adaptive_weights=True)
@@ -121,7 +199,7 @@ def initialize_models():
         print(f"[ERROR] 多模态情绪分析加载失败: {e}")
         multimodal_analyzer = None
 
-    # 6. 危机检测与干预系统
+    # 7. 危机检测与干预系统
     try:
         crisis_detector = CrisisDetector()
         crisis_responder = CrisisResponder(ai_generator=mindchat_system.generate_response if mindchat_system else None)
@@ -132,6 +210,17 @@ def initialize_models():
         crisis_detector = None
         crisis_responder = None
         crisis_storage = None
+
+    # 8. 模块化报告生成器
+    try:
+        modular_report_generator = ModularReportGenerator()
+        print("[OK] 模块化报告生成器加载成功")
+        print(f"     - 可用模块数量: {len(modular_report_generator.modules)}")
+    except Exception as e:
+        print(f"[ERROR] 模块化报告生成器加载失败: {e}")
+        import traceback
+        traceback.print_exc()
+        modular_report_generator = None
 
     print("=" * 60)
     print("初始化完成！")
@@ -159,6 +248,152 @@ def analyze_sentiment(text):
         return {"emotion": "neutral", "confidence": 0.0}
 
 
+def voice_features_to_emotion(audio_features):
+    """
+    将语音特征转换为情绪标签
+
+    Args:
+        audio_features: 语音特征字典 {
+            'pitch_mean': float,
+            'pitch_std': float,
+            'tempo': float,
+            'energy': float,
+            'shimmer': float
+        }
+
+    Returns:
+        情绪字典 {"emotion": "positive/negative/neutral", "confidence": float}
+    """
+    if not audio_features or not audio_features.get('success', False):
+        return {"emotion": "neutral", "confidence": 0.0}
+
+    features = audio_features
+
+    # 计算情绪得分
+    negative_score = 0.0
+    positive_score = 0.0
+
+    # 1. 低音高 → 负面情绪（抑郁倾向）
+    pitch_mean = features.get('pitch_mean', 0)
+    if pitch_mean > 0:
+        if pitch_mean < 120:
+            negative_score += 0.4
+        elif pitch_mean < 150:
+            negative_score += 0.2
+
+    # 2. 低能量 → 负面情绪
+    energy = features.get('energy', 0)
+    if energy < 0.05:
+        negative_score += 0.4
+    elif energy < 0.1:
+        negative_score += 0.2
+    elif energy > 0.2:
+        # 高能量可能是正面情绪（兴奋）
+        positive_score += 0.2
+
+    # 3. 高语速 → 中性/焦虑倾向（不算强烈的负面）
+    tempo = features.get('tempo', 0)
+    if tempo > 6.0:
+        # 语速过快可能是焦虑，但不算negative
+        pass
+    elif 3.0 <= tempo <= 5.0:
+        # 正常语速，略微偏向正面
+        positive_score += 0.1
+
+    # 4. 音高变化大 → 情绪波动
+    pitch_std = features.get('pitch_std', 0)
+    shimmer = features.get('shimmer', 0)
+
+    # 适度的音高变化可能是正面（表达丰富）
+    if 10 < pitch_std < 30:
+        positive_score += 0.2
+    # 过大的变化可能是情绪不稳定
+    elif pitch_std > 50:
+        negative_score += 0.2
+
+    if 0.05 < shimmer < 0.15:
+        positive_score += 0.1
+    elif shimmer > 0.3:
+        negative_score += 0.2
+
+    # 判定情绪
+    confidence = max(negative_score, positive_score, 0.3)  # 最低置信度0.3
+
+    if negative_score > positive_score and negative_score > 0.3:
+        return {"emotion": "negative", "confidence": round(confidence, 3)}
+    elif positive_score > negative_score and positive_score > 0.3:
+        return {"emotion": "positive", "confidence": round(confidence, 3)}
+    else:
+        return {"emotion": "neutral", "confidence": round(confidence, 3)}
+
+
+def fuse_emotions(text_emotion, voice_emotion, enable_voice=True):
+    """
+    融合文字情绪和语音情绪
+
+    Args:
+        text_emotion: 文字情绪分析结果 {"emotion": str, "confidence": float}
+        voice_emotion: 语音情绪分析结果 {"emotion": str, "confidence": float}
+        enable_voice: 是否启用语音情绪分析
+
+    Returns:
+        融合后的情绪 {"emotion": str, "confidence": float, "method": str}
+    """
+    # 如果未启用语音情绪分析，直接返回文字情绪
+    if not enable_voice or voice_emotion.get("confidence", 0) < 0.2:
+        return {
+            "emotion": text_emotion.get("emotion", "neutral"),
+            "confidence": text_emotion.get("confidence", 0.0),
+            "method": "text_only"
+        }
+
+    # 情绪到数值的映射
+    emotion_scores = {
+        "positive": 1.0,
+        "neutral": 0.5,
+        "negative": 0.0
+    }
+
+    text_score = emotion_scores.get(text_emotion.get("emotion", "neutral"), 0.5)
+    voice_score = emotion_scores.get(voice_emotion.get("emotion", "neutral"), 0.5)
+
+    # 文字情绪和语音情绪的置信度
+    text_conf = text_emotion.get("confidence", 0.5)
+    voice_conf = voice_emotion.get("confidence", 0.5)
+
+    # 加权融合
+    fused_score = (
+        text_score * VoiceConfig.TEXT_EMOTION_WEIGHT * text_conf +
+        voice_score * VoiceConfig.VOICE_EMOTION_WEIGHT * voice_conf
+    ) / (VoiceConfig.TEXT_EMOTION_WEIGHT * text_conf + VoiceConfig.VOICE_EMOTION_WEIGHT * voice_conf)
+
+    # 将分数转换回情绪标签
+    if fused_score >= 0.7:
+        fused_emotion = "positive"
+    elif fused_score <= 0.3:
+        fused_emotion = "negative"
+    else:
+        fused_emotion = "neutral"
+
+    # 融合置信度（加权平均）
+    fused_confidence = (
+        text_conf * VoiceConfig.TEXT_EMOTION_WEIGHT +
+        voice_conf * VoiceConfig.VOICE_EMOTION_WEIGHT
+    )
+
+    return {
+        "emotion": fused_emotion,
+        "confidence": round(fused_confidence, 3),
+        "method": "multimodal_fusion",
+        "details": {
+            "text_emotion": text_emotion.get("emotion"),
+            "voice_emotion": voice_emotion.get("emotion"),
+            "text_weight": VoiceConfig.TEXT_EMOTION_WEIGHT,
+            "voice_weight": VoiceConfig.VOICE_EMOTION_WEIGHT
+        }
+    }
+
+
 # ==================== 路由 ====================
 
 # ==================== 认证相关路由 ====================
@@ -167,7 +402,7 @@ def analyze_sentiment(text):
 def register_page():
     """注册页面"""
     if current_user.is_authenticated:
-        return redirect(url_for('scales_page'))
+        return redirect(url_for('home'))
     return render_template('register.html')
 
 
@@ -175,31 +410,85 @@ def register_page():
 def login_page():
     """登录页面"""
     if current_user.is_authenticated:
-        return redirect(url_for('scales_page'))
+        return redirect(url_for('home'))
     return render_template('login.html')
-
-
-@app.route('/profile')
-@login_required
-def profile_page():
-    """个人中心页面"""
-    return render_template('profile.html')
 
 
 @app.route('/')
 def home():
-    """首页 - 重定向到量表评估页面"""
-    if current_user.is_authenticated:
-        return redirect(url_for('scales_page'))
-    else:
+    """首页 - 根据用户角色重定向"""
+    if not current_user.is_authenticated:
         return redirect(url_for('login_page'))
+
+    # 根据角色跳转不同页面
+    if current_user.is_counselor():
+        return redirect(url_for('counselor_dashboard'))
+    else:
+        return redirect(url_for('chat_page'))
 
 
 @app.route('/chat')
 @login_required
 def chat_page():
-    """疗愈机器人页面"""
-    return render_template('chat.html')
+    """疗愈机器人页面（仅患者）"""
+    if current_user.is_counselor():
+        return redirect(url_for('counselor_dashboard'))
+
+    # 计算年龄和报告级别
+    age = calculate_age(current_user.birth_date)
+    report_level = get_report_level(current_user)
+    can_view_report = report_level != "none"
+
+    return render_template('chat.html',
+                          age=age,
+                          report_level=report_level,
+                          can_view_report=can_view_report)
+
+
+@app.route('/report')
+@login_required
+def report():
+    """报告页面（仅患者）"""
+    if current_user.is_counselor():
+        return redirect(url_for('counselor_dashboard'))
+
+    # 检查用户是否有权查看报告
+    report_level = get_report_level(current_user)
+    if report_level == "none":
+        return redirect(url_for('chat_page'))
+
+    age = calculate_age(current_user.birth_date)
+
+    return render_template('report.html',
+                          age=age,
+                          report_level=report_level)
+
+
+@app.route('/profile')
+@login_required
+def profile_page():
+    """个人中心页面（仅患者）"""
+    if current_user.is_counselor():
+        return redirect(url_for('counselor_dashboard'))
+
+    # 计算年龄和报告级别
+    age = calculate_age(current_user.birth_date)
+    report_level = get_report_level(current_user)
+    can_view_report = report_level != "none"
+
+    return render_template('profile.html',
+                          age=age,
+                          report_level=report_level,
+                          can_view_report=can_view_report)
+
+
+@app.route('/counselor')
+@login_required
+def counselor_dashboard():
+    """心理咨询师仪表盘（仅咨询师）"""
+    if not current_user.is_counselor():
+        return redirect(url_for('chat_page'))
+    return render_template('counselor_dashboard.html')
 
 
 @app.route('/favicon.ico')
@@ -209,63 +498,16 @@ def favicon():
     return Response('', mimetype='image/x-icon')
 
 
-@app.route('/report')
+@app.route('/api/debug/status')
 @login_required
-def report():
-    """诊断报告页面"""
-    return render_template('report.html')
-
-
-@app.route('/trend-analysis')
-@login_required
-def trend_analysis():
-    """综合诊断趋势分析页面"""
-    return render_template('trend_analysis.html')
-
-
-@app.route('/scales')
-@login_required
-def scales_page():
-    """量表选择页面"""
-    return render_template('scales.html')
-
-
-@app.route('/comprehensive')
-@login_required
-def comprehensive_assessment():
-    """综合评估页面"""
-    return render_template('comprehensive_assessment.html')
-
-
-@app.route('/scale/<scale_id>')
-@login_required
-def scale_test_page(scale_id):
-    """量表测试页面"""
-    # 验证量表ID是否有效
-    scale_info = ScaleManager.get_scale_info(scale_id)
-    if not scale_info:
-        return "量表不存在", 404
-    return render_template('scale_test.html')
-
-
-@app.route('/scale/result/<result_id>')
-@login_required
-def scale_result_page(result_id):
-    """量表结果页面"""
-    assessment = AssessmentResult.query.filter_by(result_id=result_id).first()
-    if not assessment:
-        return "结果不存在", 404
-    return render_template('scale_result.html')
-
-
-@app.route('/scale/comprehensive-result/<result_id>')
-@login_required
-def comprehensive_result_page(result_id):
-    """综合评估结果页面"""
-    assessment = AssessmentResult.query.filter_by(result_id=result_id).first()
-    if not assessment:
-        return "结果不存在", 404
-    return render_template('comprehensive_result.html')
+def debug_status():
+    """调试端点：检查全局变量状态"""
+    return jsonify({
+        "modular_report_generator": modular_report_generator is not None,
+        "modular_report_generator_type": str(type(modular_report_generator)) if modular_report_generator else None,
+        "mindchat_system": mindchat_system is not None,
+        "crisis_detector": crisis_detector is not None
+    })
 
 
 # ==================== 认证相关 API ====================
@@ -278,16 +520,25 @@ def register():
         username = data.get('username', '').strip()
         email = data.get('email', '').strip().lower()
         password = data.get('password', '')
+        role = data.get('role', 'patient').strip()
+        birth_date_str = data.get('birth_date', '').strip()
 
         # 验证输入
-        if not username or not email or not password:
-            return jsonify({"error": "请填写所有字段"}), 400
+        if not username or not email or not password or not role:
+            return jsonify({"error": "请填写所有必填字段"}), 400
+
+        if role not in ['patient', 'counselor']:
+            return jsonify({"error": "无效的用户角色"}), 400
 
         if len(username) < 3 or len(username) > 20:
             return jsonify({"error": "用户名长度必须在3-20个字符之间"}), 400
 
         if len(password) < 6:
             return jsonify({"error": "密码长度至少为6个字符"}), 400
+
+        # 患者必须提供出生日期
+        if role == 'patient' and not birth_date_str:
+            return jsonify({"error": "请填写出生日期"}), 400
 
         # 检查用户名是否已存在
         if User.query.filter_by(username=username).first():
@@ -298,15 +549,23 @@ def register():
             return jsonify({"error": "邮箱已被注册"}), 400
 
         # 创建新用户
-        user = User(username=username, email=email)
+        user = User(username=username, email=email, role=role)
         user.set_password(password)
+
+        # 解析出生日期（仅患者）
+        if role == 'patient' and birth_date_str:
+            try:
+                user.birth_date = datetime.strptime(birth_date_str, '%Y-%m-%d').date()
+            except ValueError:
+                return jsonify({"error": "出生日期格式错误，应为 YYYY-MM-DD"}), 400
 
         db.session.add(user)
         db.session.commit()
 
         return jsonify({
             "success": True,
-            "message": "注册成功！请登录"
+            "message": "注册成功！请登录",
+            "role": role
         })
 
     except Exception as e:
@@ -358,14 +617,36 @@ def login():
         return jsonify({"error": "登录失败，请稍后重试"}), 500
 
 
-@app.route('/api/auth/logout', methods=['POST'])
+@app.route('/logout', methods=['GET', 'POST'])
 def logout():
-    """用户登出API"""
+    """用户登出（支持GET和POST）"""
     try:
         logout_user()
-        return jsonify({"success": True, "message": "已退出登录"})
+        if request.method == 'POST':
+            return jsonify({"success": True, "message": "已退出登录"})
+        else:
+            return redirect(url_for('login_page'))
     except Exception as e:
-        return jsonify({"error": "退出失败"}), 500
+        if request.method == 'POST':
+            return jsonify({"error": "退出失败"}), 500
+        else:
+            return redirect(url_for('login_page'))
+
+
+@app.route('/api/auth/logout', methods=['GET', 'POST'])
+def logout_api():
+    """用户登出API（保持兼容）"""
+    try:
+        logout_user()
+        if request.method == 'POST':
+            return jsonify({"success": True, "message": "已退出登录"})
+        else:
+            return redirect('/')
+    except Exception as e:
+        if request.method == 'POST':
+            return jsonify({"error": "退出失败"}), 500
+        else:
+            return redirect('/')
 
 
 @app.route('/api/user/info')
@@ -375,224 +656,51 @@ def get_user_info():
     return jsonify(current_user.to_dict())
 
 
+# ==================== 患者相关 API ====================
+
 @app.route('/api/user/statistics')
 @login_required
 def get_user_statistics():
-    """获取用户统计信息"""
+    """获取用户统计信息（仅患者）"""
+    if current_user.is_counselor():
+        return jsonify({"error": "心理咨询师无此功能"}), 403
+
     try:
-        # 总评估次数
-        total_count = AssessmentResult.query.filter_by(user_id=current_user.id).count()
+        # 获取对话总数
+        total_chats = ChatMessage.query.filter_by(user_id=current_user.id).count()
 
-        # 综合评估次数
-        comprehensive_count = AssessmentResult.query.filter_by(
-            user_id=current_user.id,
-            assessment_type='comprehensive'
-        ).count()
+        # 获取情绪统计
+        from sqlalchemy import func
+        emotion_stats = db.session.query(
+            ChatMessage.emotion,
+            func.count(ChatMessage.id)
+        ).filter_by(
+            user_id=current_user.id
+        ).group_by(
+            ChatMessage.emotion
+        ).all()
 
-        # 单独评估次数
-        single_count = AssessmentResult.query.filter_by(
-            user_id=current_user.id,
-            assessment_type='single'
-        ).count()
+        emotion_counts = {e: 0 for e in ['positive', 'negative', 'neutral']}
+        for emotion, count in emotion_stats:
+            if emotion in emotion_counts:
+                emotion_counts[emotion] = count
 
-        # 最近一次评估时间
-        latest_result = AssessmentResult.query.filter_by(user_id=current_user.id)\
-            .order_by(AssessmentResult.created_at.desc())\
+        # 最近一次对话时间
+        latest_chat = ChatMessage.query.filter_by(user_id=current_user.id)\
+            .order_by(ChatMessage.created_at.desc())\
             .first()
 
-        latest_date = latest_result.created_at.isoformat() if latest_result else None
+        latest_date = latest_chat.created_at.isoformat() if latest_chat else None
 
         return jsonify({
-            'total_count': total_count,
-            'comprehensive_count': comprehensive_count,
-            'single_count': single_count,
+            'total_chats': total_chats,
+            'emotion_counts': emotion_counts,
             'latest_date': latest_date
         })
 
     except Exception as e:
         print(f"获取统计信息错误: {e}")
         return jsonify({"error": "获取统计信息失败"}), 500
-
-
-@app.route('/api/user/history')
-@login_required
-def get_user_history():
-    """获取用户评估历史"""
-    try:
-        limit = request.args.get('limit', 50, type=int)
-
-        results = AssessmentResult.query.filter_by(user_id=current_user.id)\
-            .order_by(AssessmentResult.created_at.desc())\
-            .limit(limit)\
-            .all()
-
-        history = []
-        for r in results:
-            result_data = r.get_results()
-
-            # 单独评估
-            if r.assessment_type == 'single' and 'scale_id' in result_data:
-                scale_id = result_data['scale_id']
-                scale_info = ScaleManager.get_scale_info(scale_id)
-
-                history.append({
-                    'id': r.id,
-                    'result_id': r.result_id,
-                    'assessment_type': r.assessment_type,
-                    'created_at': r.created_at.isoformat(),
-                    'scale_id': scale_id,
-                    'scale_name': scale_info['name'] if scale_info else scale_id,
-                    'scale_icon': scale_info['icon'] if scale_info else '📋',
-                    'score': result_data['result'].get('total_score', 0),
-                    'max_score': result_data['result'].get('max_score', 0),
-                    'severity': result_data['result'].get('severity', ''),
-                    'level': result_data['result'].get('level', ''),
-                    'recommendation': result_data['result'].get('recommendation', '')
-                })
-
-            # 综合评估
-            elif r.assessment_type == 'comprehensive' and 'results' in result_data:
-                for scale_result in result_data['results']:
-                    scale_id = scale_result.get('scale_id', '')
-                    scale_info = ScaleManager.get_scale_info(scale_id)
-
-                    history.append({
-                        'id': r.id,
-                        'result_id': r.result_id,
-                        'assessment_type': r.assessment_type,
-                        'created_at': r.created_at.isoformat(),
-                        'scale_id': scale_id,
-                        'scale_name': scale_info['name'] if scale_info else scale_id,
-                        'scale_icon': scale_info['icon'] if scale_info else '📋',
-                        'score': scale_result.get('total_score', 0),
-                        'max_score': scale_result.get('max_score', 0),
-                        'severity': scale_result.get('severity', ''),
-                        'level': scale_result.get('level', ''),
-                        'recommendation': scale_result.get('recommendation', '')
-                    })
-
-        return jsonify({'history': history})
-
-    except Exception as e:
-        print(f"获取历史记录错误: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": "获取历史记录失败"}), 500
-
-
-@app.route('/api/user/scale-history')
-@login_required
-def get_user_scale_history():
-    """获取当前用户的量表评估历史"""
-    try:
-        # 查询最近的评估记录，限制20条
-        results = AssessmentResult.query.filter_by(user_id=current_user.id)\
-            .order_by(AssessmentResult.created_at.desc())\
-            .limit(20)\
-            .all()
-
-        history = []
-        for r in results:
-            result_data = r.get_results()
-
-            # 格式化日期
-            date_str = r.created_at.strftime('%Y-%m-%d %H:%M:%S')
-
-            # 单独评估
-            if r.assessment_type == 'single' and 'scale_id' in result_data:
-                scale_id = result_data['scale_id']
-                scale_info = ScaleManager.get_scale_info(scale_id)
-                scale_name = scale_info['name'] if scale_info else scale_id
-
-                history.append({
-                    'date': date_str,
-                    'type': scale_name,
-                    'score': result_data['result'].get('total_score', 0),
-                    'severity': result_data['result'].get('severity', '')
-                })
-
-            # 综合评估
-            elif r.assessment_type == 'comprehensive' and 'results' in result_data:
-                # 综合评估包含多个量表，为每个量表创建一条记录
-                for scale_result in result_data['results']:
-                    scale_id = scale_result.get('scale_id', '')
-                    scale_info = ScaleManager.get_scale_info(scale_id)
-                    scale_name = scale_info['name'] if scale_info else scale_id
-
-                    history.append({
-                        'date': date_str,
-                        'type': scale_name,
-                        'score': scale_result.get('total_score', 0),
-                        'severity': scale_result.get('severity', '')
-                    })
-
-        return jsonify({
-            'success': True,
-            'data': history
-        })
-
-    except Exception as e:
-        print(f"获取量表历史错误: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({
-            'success': False,
-            'error': '获取量表历史失败'
-        }), 500
-
-
-@app.route('/api/user/chat-history')
-@login_required
-def get_chat_history():
-    """获取当前用户的对话历史（按日期分组统计）"""
-    try:
-        # 按日期分组查询对话记录
-        from sqlalchemy import func
-
-        # 查询所有对话消息，按日期分组
-        chat_dates = db.session.query(
-            func.date(ChatMessage.created_at).label('chat_date'),
-            func.count(ChatMessage.id).label('message_count'),
-            func.max(ChatMessage.created_at).label('last_update')
-        ).filter_by(
-            user_id=current_user.id
-        ).group_by(
-            func.date(ChatMessage.created_at)
-        ).order_by(
-            func.date(ChatMessage.created_at).desc()
-        ).limit(20).all()
-
-        history = []
-        for chat_date, message_count, last_update in chat_dates:
-            # func.date() 返回的是日期字符串，直接使用
-            # 如果是字符串格式，直接使用；如果是日期对象，转换为字符串
-            if isinstance(chat_date, str):
-                date_str = chat_date
-            else:
-                date_str = str(chat_date) if chat_date else ''
-
-            # last_update 是 datetime 对象，需要格式化
-            last_update_str = last_update.strftime('%Y-%m-%d %H:%M:%S') if last_update else ''
-
-            history.append({
-                'date': date_str,
-                'message_count': message_count,
-                'last_update': last_update_str
-            })
-
-        return jsonify({
-            'success': True,
-            'data': history
-        })
-
-    except Exception as e:
-        print(f"获取对话历史错误: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({
-            'success': False,
-            'error': '获取对话历史失败'
-        }), 500
 
 
 @app.route('/api/user/chat-messages')
@@ -634,103 +742,14 @@ def get_chat_messages():
         }), 500
 
 
-@app.route('/api/user/chat-messages/<int:message_id>', methods=['DELETE'])
-@login_required
-def delete_chat_message(message_id):
-    """删除指定的聊天消息"""
-    try:
-        message = ChatMessage.query.filter_by(
-            id=message_id,
-            user_id=current_user.id
-        ).first()
-
-        if not message:
-            return jsonify({
-                'success': False,
-                'error': '消息不存在或无权删除'
-            }), 404
-
-        db.session.delete(message)
-        db.session.commit()
-
-        print(f"✓ 用户 {current_user.id} 删除了消息 {message_id}")
-
-        return jsonify({
-            'success': True,
-            'message': '删除成功'
-        })
-
-    except Exception as e:
-        db.session.rollback()
-        print(f"删除消息错误: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({
-            'success': False,
-            'error': '删除失败'
-        }), 500
-
-
 @app.route('/api/user/trend-data')
 @login_required
 def get_user_trend_data():
     """获取用户历史趋势数据"""
+    if current_user.is_counselor():
+        return jsonify({"error": "心理咨询师无此功能"}), 403
+
     try:
-        # 获取所有评估结果
-        results = AssessmentResult.query.filter_by(user_id=current_user.id)\
-            .order_by(AssessmentResult.created_at.asc())\
-            .all()
-
-        # 按量表分组统计
-        scale_data = {
-            'phq9': [],
-            'abc': [],
-            'cars': [],
-            'hamd': []
-        }
-
-        for r in results:
-            result_data = r.get_results()
-
-            # 单独评估
-            if r.assessment_type == 'single' and 'scale_id' in result_data:
-                scale_id = result_data['scale_id']
-                if scale_id in scale_data and 'result' in result_data:
-                    scale_data[scale_id].append({
-                        'date': r.created_at.isoformat(),
-                        'score': result_data['result'].get('total_score', 0),
-                        'severity': result_data['result'].get('severity', ''),
-                        'level': result_data['result'].get('level', '')
-                    })
-
-            # 综合评估
-            elif r.assessment_type == 'comprehensive' and 'results' in result_data:
-                for scale_result in result_data['results']:
-                    scale_id = scale_result.get('scale_id', '')
-                    if scale_id in scale_data:
-                        scale_data[scale_id].append({
-                            'date': r.created_at.isoformat(),
-                            'score': scale_result.get('total_score', 0),
-                            'severity': scale_result.get('severity', ''),
-                            'level': scale_result.get('level', '')
-                        })
-
-        # 计算趋势统计
-        trend_stats = {}
-        for scale_id, data in scale_data.items():
-            if len(data) > 0:
-                scores = [d['score'] for d in data]
-                trend_stats[scale_id] = {
-                    'count': len(data),
-                    'avg_score': round(sum(scores) / len(scores), 1),
-                    'min_score': min(scores),
-                    'max_score': max(scores),
-                    'latest': data[-1] if data else None,
-                    'trend': 'improving' if len(data) >= 2 and scores[-1] < scores[-2] else
-                             'stable' if len(data) >= 2 and scores[-1] == scores[-2] else
-                             'declining' if len(data) >= 2 else 'unknown'
-                }
-
         # 获取聊天数据
         chat_messages = ChatMessage.query.filter_by(user_id=current_user.id)\
             .order_by(ChatMessage.created_at.asc())\
@@ -740,11 +759,9 @@ def get_user_trend_data():
         chat_emotion_data = []
         emotion_counts = {'positive': 0, 'negative': 0, 'neutral': 0}
 
-        # 有效的情绪值
         valid_emotions = {'positive', 'negative', 'neutral'}
 
         for msg in chat_messages:
-            # 验证情绪值是否有效
             emotion = msg.emotion if msg.emotion in valid_emotions else 'neutral'
 
             chat_emotion_data.append({
@@ -755,19 +772,14 @@ def get_user_trend_data():
             emotion_counts[emotion] = emotion_counts.get(emotion, 0) + 1
 
         # 计算最近7天的情绪分布
-        from datetime import timedelta
         week_ago = datetime.utcnow() - timedelta(days=7)
         recent_chats = [m for m in chat_messages if m.created_at >= week_ago]
         recent_emotion_counts = {'positive': 0, 'negative': 0, 'neutral': 0}
         for msg in recent_chats:
-            # 验证情绪值是否有效
             emotion = msg.emotion if msg.emotion in valid_emotions else 'neutral'
             recent_emotion_counts[emotion] = recent_emotion_counts.get(emotion, 0) + 1
 
         return jsonify({
-            'scale_data': scale_data,
-            'trend_stats': trend_stats,
-            'total_assessments': len(results),
             'chat_data': {
                 'total_messages': len(chat_messages),
                 'emotion_data': chat_emotion_data,
@@ -785,18 +797,108 @@ def get_user_trend_data():
         return jsonify({"error": "获取趋势数据失败"}), 500
 
 
+@app.route('/api/report/generate')
+@login_required
+def generate_age_adaptive_report():
+    """生成模块化情绪报告API (Layer 1: 数据概览 + 模块推荐)"""
+    print(f"\n[DEBUG] /api/report/generate 被调用")
+    print(f"[DEBUG] current_user.id: {current_user.id}")
+    print(f"[DEBUG] current_user.birth_date: {current_user.birth_date}")
+
+    if current_user.is_counselor():
+        return jsonify({"error": "咨询师无需使用此功能"}), 403
+
+    try:
+        # 检查用户是否有权查看报告
+        report_level = get_report_level(current_user)
+        print(f"[DEBUG] report_level: {report_level}")
+
+        if report_level == "none":
+            return jsonify({"error": "您还未达到查看报告的年龄要求"}), 403
+
+        # 检查模块化报告生成器是否可用
+        print(f"[DEBUG] modular_report_generator is None: {modular_report_generator is None}")
+        if modular_report_generator is None:
+            print("[ERROR] modular_report_generator is None!")
+            return jsonify({"error": "报告生成器未初始化"}), 500
+
+        # 计算年龄
+        age = calculate_age(current_user.birth_date)
+        print(f"[DEBUG] calculated age: {age}")
+
+        # 生成Layer 1报告（数据概览 + 模块推荐）
+        print(f"[DEBUG] 开始生成报告...")
+        report = modular_report_generator.generate_layer1_report(
+            user_id=current_user.id,
+            age=age,
+            report_level=report_level
+        )
+        print(f"[DEBUG] 报告生成成功")
+
+        return jsonify({
+            "success": True,
+            "report": report
+        })
+
+    except Exception as e:
+        print(f"[ERROR] 生成报告错误: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"生成报告失败: {str(e)}"}), 500
+
+
+@app.route('/api/report/module/<module_name>')
+@login_required
+def get_report_module_detail(module_name):
+    """获取指定模块的详细内容 (Layer 2)"""
+    if current_user.is_counselor():
+        return jsonify({"error": "咨询师无需使用此功能"}), 403
+
+    try:
+        # 检查用户是否有权查看报告
+        report_level = get_report_level(current_user)
+        if report_level == "none":
+            return jsonify({"error": "您还未达到查看报告的年龄要求"}), 403
+
+        # 检查模块化报告生成器是否可用
+        if modular_report_generator is None:
+            return jsonify({"error": "报告生成器未初始化"}), 500
+
+        # 计算年龄
+        age = calculate_age(current_user.birth_date)
+
+        # 获取模块详情
+        module_detail = modular_report_generator.get_layer2_module(
+            module_name=module_name,
+            age=age,
+            report_level=report_level
+        )
+
+        if module_detail is None:
+            return jsonify({"error": f"模块 '{module_name}' 不存在"}), 404
+
+        return jsonify({
+            "success": True,
+            "module": module_detail
+        })
+
+    except Exception as e:
+        print(f"获取模块详情错误: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": "获取模块详情失败"}), 500
+
+
 @app.route('/api/profile/export')
 @login_required
 def export_profile_data():
     """导出用户数据为CSV文件"""
+    if current_user.is_counselor():
+        return jsonify({"error": "心理咨询师无此功能"}), 403
+
     try:
         # 创建内存中的CSV文件
         output = io.StringIO()
-
-        # 获取所有评估结果
-        assessment_results = AssessmentResult.query.filter_by(user_id=current_user.id)\
-            .order_by(AssessmentResult.created_at.desc())\
-            .all()
 
         # 获取所有对话记录
         chat_messages = ChatMessage.query.filter_by(user_id=current_user.id)\
@@ -806,46 +908,7 @@ def export_profile_data():
         # 写入CSV
         writer = csv.writer(output)
 
-        # 写入量表评估结果
-        writer.writerow(['===== 量表评估结果 ====='])
-        writer.writerow(['日期', '类型', '分数', '详情'])
-
-        for result in assessment_results:
-            result_data = result.get_results()
-            date_str = result.created_at.strftime('%Y-%m-%d %H:%M:%S')
-
-            # 单独评估
-            if result.assessment_type == 'single' and 'scale_id' in result_data:
-                scale_id = result_data['scale_id']
-                scale_info = ScaleManager.get_scale_info(scale_id)
-                scale_name = scale_info['name'] if scale_info else scale_id
-
-                score_data = result_data.get('result', {})
-                score = f"{score_data.get('total_score', 0)}/{score_data.get('max_score', 0)}"
-                severity = score_data.get('severity', '')
-                level = score_data.get('level', '')
-
-                detail = f"{scale_name} - {severity} ({level})"
-
-                writer.writerow([date_str, '单独评估', score, detail])
-
-            # 综合评估
-            elif result.assessment_type == 'comprehensive' and 'results' in result_data:
-                for scale_result in result_data['results']:
-                    scale_id = scale_result.get('scale_id', '')
-                    scale_info = ScaleManager.get_scale_info(scale_id)
-                    scale_name = scale_info['name'] if scale_info else scale_id
-
-                    score = f"{scale_result.get('total_score', 0)}/{scale_result.get('max_score', 0)}"
-                    severity = scale_result.get('severity', '')
-                    level = scale_result.get('level', '')
-
-                    detail = f"{scale_name} - {severity} ({level})"
-
-                    writer.writerow([date_str, '综合评估', score, detail])
-
-        # 写入空行分隔
-        writer.writerow([])
+        # 写入对话记录
         writer.writerow(['===== 对话记录 ====='])
         writer.writerow(['日期', '用户消息', 'AI回复', '情绪', '置信度'])
 
@@ -908,59 +971,154 @@ def export_profile_data():
         return jsonify({"error": "导出数据失败"}), 500
 
 
-@app.route('/api/scale/<scale_id>/history')
+# ==================== 心理咨询师相关 API ====================
+
+@app.route('/api/counselor/patients')
 @login_required
-def get_scale_history(scale_id):
-    """获取特定量表的历史记录"""
+def get_all_patients():
+    """获取所有患者列表（仅咨询师）"""
+    if not current_user.is_counselor():
+        return jsonify({"error": "无权访问"}), 403
+
     try:
-        results = AssessmentResult.query.filter_by(user_id=current_user.id)\
-            .order_by(AssessmentResult.created_at.desc())\
-            .all()
+        # 获取所有患者
+        patients = User.query.filter_by(role='patient').order_by(User.created_at.desc()).all()
 
-        history = []
-        for r in results:
-            result_data = r.get_results()
+        patient_list = []
+        for patient in patients:
+            # 获取患者的对话统计
+            chat_count = ChatMessage.query.filter_by(user_id=patient.id).count()
 
-            # 单独评估
-            if r.assessment_type == 'single' and 'scale_id' in result_data:
-                if result_data['scale_id'] == scale_id:
-                    history.append({
-                        'result_id': r.result_id,
-                        'date': r.created_at.isoformat(),
-                        'score': result_data['result'].get('total_score', 0),
-                        'severity': result_data['result'].get('severity', ''),
-                        'level': result_data['result'].get('level', ''),
-                        'recommendation': result_data['result'].get('recommendation', ''),
-                        'max_score': result_data['result'].get('max_score', 0)
-                    })
+            # 获取最近的对话时间
+            latest_chat = ChatMessage.query.filter_by(user_id=patient.id)\
+                .order_by(ChatMessage.created_at.desc())\
+                .first()
 
-            # 综合评估
-            elif r.assessment_type == 'comprehensive' and 'results' in result_data:
-                for scale_result in result_data['results']:
-                    if scale_result.get('scale_id') == scale_id:
-                        history.append({
-                            'result_id': r.result_id,
-                            'date': r.created_at.isoformat(),
-                            'score': scale_result.get('total_score', 0),
-                            'severity': scale_result.get('severity', ''),
-                            'level': scale_result.get('level', ''),
-                            'recommendation': scale_result.get('recommendation', ''),
-                            'max_score': scale_result.get('max_score', 0)
-                        })
+            # 计算年龄
+            age = None
+            if patient.birth_date:
+                today = date.today()
+                age = today.year - patient.birth_date.year - (
+                    (today.month, today.day) < (patient.birth_date.month, patient.birth_date.day)
+                )
 
-        return jsonify({'history': history})
+            patient_list.append({
+                'id': patient.id,
+                'username': patient.username,
+                'email': patient.email,
+                'birth_date': patient.birth_date.isoformat() if patient.birth_date else None,
+                'age': age,
+                'created_at': patient.created_at.strftime('%Y-%m-%d') if patient.created_at else None,
+                'last_login': patient.last_login.strftime('%Y-%m-%d %H:%M:%S') if patient.last_login else None,
+                'chat_count': chat_count,
+                'latest_chat_date': latest_chat.created_at.strftime('%Y-%m-%d %H:%M:%S') if latest_chat else None
+            })
+
+        return jsonify({
+            'success': True,
+            'patients': patient_list,
+            'total': len(patient_list)
+        })
 
     except Exception as e:
-        print(f"获取量表历史错误: {e}")
-        return jsonify({"error": "获取量表历史失败"}), 500
+        print(f"获取患者列表错误: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": "获取患者列表失败"}), 500
+
+
+@app.route('/api/counselor/patient/<int:patient_id>')
+@login_required
+def get_patient_detail(patient_id):
+    """获取患者详细信息（仅咨询师）"""
+    if not current_user.is_counselor():
+        return jsonify({"error": "无权访问"}), 403
+
+    try:
+        patient = User.query.filter_by(id=patient_id, role='patient').first()
+        if not patient:
+            return jsonify({"error": "患者不存在"}), 404
+
+        # 获取患者的对话记录
+        chat_messages = ChatMessage.query.filter_by(user_id=patient_id)\
+            .order_by(ChatMessage.created_at.desc())\
+            .limit(100)\
+            .all()
+
+        # 获取情绪统计
+        from sqlalchemy import func
+        emotion_stats = db.session.query(
+            ChatMessage.emotion,
+            func.count(ChatMessage.id)
+        ).filter_by(
+            user_id=patient_id
+        ).group_by(
+            ChatMessage.emotion
+        ).all()
+
+        emotion_counts = {e: 0 for e in ['positive', 'negative', 'neutral']}
+        for emotion, count in emotion_stats:
+            if emotion in emotion_counts:
+                emotion_counts[emotion] = count
+
+        # 计算年龄
+        age = None
+        if patient.birth_date:
+            today = date.today()
+            age = today.year - patient.birth_date.year - (
+                (today.month, today.day) < (patient.birth_date.month, patient.birth_date.day)
+            )
+
+        # 获取危机干预记录
+        crisis_count = ChatMessage.query.filter_by(
+            user_id=patient_id,
+            is_crisis_response=True
+        ).count()
+
+        return jsonify({
+            'success': True,
+            'patient': {
+                'id': patient.id,
+                'username': patient.username,
+                'email': patient.email,
+                'birth_date': patient.birth_date.isoformat() if patient.birth_date else None,
+                'age': age,
+                'created_at': patient.created_at.isoformat() if patient.created_at else None,
+                'last_login': patient.last_login.isoformat() if patient.last_login else None,
+                'chat_count': len(chat_messages),
+                'emotion_counts': emotion_counts,
+                'crisis_count': crisis_count
+            },
+            'recent_chats': [{
+                'id': msg.id,
+                'user_message': msg.user_message,
+                'bot_response': msg.bot_response,
+                'emotion': msg.emotion,
+                'is_crisis_response': msg.is_crisis_response,
+                'created_at': msg.created_at.strftime('%Y-%m-%d %H:%M:%S') if msg.created_at else None
+            } for msg in chat_messages]
+        })
+
+    except Exception as e:
+        print(f"获取患者详情错误: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": "获取患者详情失败"}), 500
+
+
+# 固定的 system prompt
 
 
 @app.route('/api/chat', methods=['POST'])
 @login_required
 def chat():
-    """处理聊天请求"""
+    """处理聊天请求（仅患者）"""
+    if current_user.is_counselor():
+        return jsonify({"error": "心理咨询师不能使用对话功能"}), 403
+
     data = request.json
     message = data.get('message', '').strip()
+    voice_emotion_data = data.get('voice_emotion')  # 接收语音情绪数据
 
     # 验证消息不为空且有实际内容
     if not message:
@@ -971,22 +1129,34 @@ def chat():
         return jsonify({"error": "消息内容太短，请重新输入"}), 400
 
     try:
-        # 1. 分析情绪
-        emotion_data = analyze_sentiment(message)
+        # 1. 分析文字情绪
+        text_emotion = analyze_sentiment(message)
 
-        # 1.5. 危机检测（新增）
+        # 2. 如果提供了语音情绪，进行融合分析
+        if voice_emotion_data and VoiceConfig.ENABLE_VOICE_EMOTION:
+            emotion_data = fuse_emotions(text_emotion, voice_emotion_data, enable_voice=True)
+            print(f"[多模态情绪融合] 文字: {text_emotion['emotion']}, 语音: {voice_emotion_data.get('emotion')}, 融合: {emotion_data['emotion']}")
+        else:
+            emotion_data = text_emotion
+            emotion_data["method"] = "text_only"
+
+        # 2. 危机检测
         crisis_detected = False
         crisis_level = 0
         crisis_response_data = None
 
         if crisis_detector:
             try:
-                # 执行危机检测
+                # 执行危机检测（使用融合后的情绪）
+                voice_emotion_for_crisis = None
+                if voice_emotion_data and VoiceConfig.ENABLE_VOICE_EMOTION:
+                    voice_emotion_for_crisis = voice_emotion_data
+
                 detection_result = crisis_detector.detect(
                     user_input=message,
                     user_id=current_user.id,
-                    voice_emotion=None,  # 暂不支持语音输入
-                    scale_scores=None     # 会自动从数据库获取
+                    voice_emotion=voice_emotion_for_crisis,
+                    scale_scores=None
                 )
 
                 # 如果检测到危机
@@ -995,9 +1165,6 @@ def chat():
                     crisis_level = detection_result.level
 
                     print(f"[危机检测] 用户 {current_user.id}: 检测到危机等级 {crisis_level}")
-                    print(f"  关键词: {detection_result.keywords}")
-                    print(f"  置信度: {detection_result.confidence:.2f}")
-                    print(f"  建议行动: {detection_result.suggested_action}")
 
                     # 记录到危机事件数据库
                     if crisis_storage:
@@ -1029,7 +1196,7 @@ def chat():
                                 bot_response=response,
                                 emotion=emotion_data["emotion"],
                                 confidence=emotion_data["confidence"],
-                                is_crisis_response=True  # 标记为危机回复
+                                is_crisis_response=True
                             )
                             db.session.add(chat_message)
                             db.session.commit()
@@ -1048,73 +1215,20 @@ def chat():
                 import traceback
                 traceback.print_exc()
 
-        # 2. 获取用户策略（如果有）
-        strategy_used = "default"
-        strategy_name = "默认"
+        # 3. 生成系统提示词
+        conversation_id = f"user_{current_user.id}"  # 每个用户一个会话
 
-        try:
-            from models import UserStrategyProfile
-            strategy_profile = UserStrategyProfile.query.filter_by(user_id=current_user.id).first()
+        # 使用固定的系统提示词
+        system_prompt = PromptConfig.FIXED_SYSTEM_PROMPT
 
-            if strategy_profile and strategy_profile.preferred_style:
-                strategy_used = strategy_profile.preferred_style
-
-                # 获取风格名称
-                from personalized_healing import UserProfile
-                if strategy_used in UserProfile.CONVERSATION_STYLES:
-                    strategy_name = UserProfile.CONVERSATION_STYLES[strategy_used]['name']
-                elif strategy_used == 'auto':
-                    strategy_name = '自动推荐'
-        except Exception as e:
-            print(f"获取用户策略失败: {e}")
-
-        # 3. 生成动态prompt（优化版：病耻感友好 + 精简高效）
-        dynamic_prompt = None
-        try:
-            from dynamic_prompt_generator import DynamicPromptGenerator
-            prompt_generator = DynamicPromptGenerator(current_user.id, stigma_aware=True)
-            dynamic_prompt = prompt_generator.generate_system_prompt()
-
-            # 记录调试信息
-            time_context = prompt_generator.get_current_time_period()
-            emotion_context = prompt_generator.get_emotion_context()
-
-            print(f"[动态Prompt v2.1] 用户 {current_user.id}:")
-            print(f"  病耻感友好模式: ✅ 启用")
-            print(f"  Prompt类型: 精简优化版")
-            print(f"  最近情绪: {emotion_context['recent_emotions']}")
-            print(f"  情绪状态: {emotion_context['state_description']}")
-            print(f"  时间: {time_context['period_name']}")
-            print(f"  Prompt长度: {len(dynamic_prompt)} 字符")
-
-            # 检查Prompt长度
-            if len(dynamic_prompt) > 800:
-                print(f"  ⚠️ 警告：Prompt偏长，可能影响回复完整性")
-            elif len(dynamic_prompt) < 400:
-                print(f"  ✅ Prompt长度优秀")
-            else:
-                print(f"  ✅ Prompt长度合理")
-
-        except Exception as e:
-            print(f"[动态Prompt] 生成失败，使用默认prompt: {e}")
-            import traceback
-            traceback.print_exc()
-
-        # 4. 生成回复（使用动态prompt，传入user_id）
-        result = mindchat_system.analyze_and_respond(message, system_prompt=dynamic_prompt, user_id=current_user.id)
+        # 生成回复
+        result = mindchat_system.analyze_and_respond(message, system_prompt=system_prompt, user_id=current_user.id)
 
         if result.get("success"):
             response = result["response"]
 
             # 获取引导问题
             follow_up_questions = result.get("follow_up_questions", [])
-
-            # 4.5. 应用个性化策略（基于用户反馈）
-            try:
-                from personalized_dialogue import personalized_strategy
-                response = personalized_strategy.adjust_response_style(current_user.id, response)
-            except Exception as e:
-                print(f"个性化策略应用失败: {e}")
 
             # 清理回复 - 优化版：只移除明显的重复开头，保留完整内容
             unwanted_prefixes = [
@@ -1143,7 +1257,7 @@ def chat():
                     response = response[:truncate_point]
                     print(f"[聊天] 智能截断: {original_length} → {truncate_point} 字符")
 
-            # 保存聊天记录到数据库（保存完整的原始响应）
+            # 保存聊天记录到数据库
             chat_message = ChatMessage(
                 user_id=current_user.id,
                 user_message=message,
@@ -1170,25 +1284,24 @@ def chat():
                 except Exception as e:
                     print(f"TTS生成错误: {e}")
 
-            return jsonify({
+            # 准备返回数据
+            response_data = {
                 "success": True,
                 "response": response if response else "我在听，请继续说。",
                 "emotion": emotion_data["emotion"],
                 "confidence": emotion_data["confidence"],
                 "audio_path": audio_path,
-                "chat_message_id": chat_message.id,  # 返回消息ID用于反馈
-                "strategy_used": strategy_used,
-                "strategy_name": strategy_name,
-                "dynamic_prompt_enabled": dynamic_prompt is not None,  # 是否启用动态prompt
-                "follow_up_questions": follow_up_questions,  # 添加引导问题
-                "debug_info": {
-                    "depression_level": prompt_generator.get_depression_level() if dynamic_prompt else None,
-                    "time_period": prompt_generator.get_current_time_period()['period'] if dynamic_prompt else None,
-                    "emotion_state": prompt_generator.get_emotion_context()['state_description'] if dynamic_prompt else None,
-                    "recent_emotions": prompt_generator.get_emotion_context()['recent_emotions'] if dynamic_prompt else None,
-                    "prompt_length": len(dynamic_prompt) if dynamic_prompt else 0
-                } if dynamic_prompt else None
-            })
+                "chat_message_id": chat_message.id,
+                "follow_up_questions": follow_up_questions
+            }
+
+            # 如果使用了融合情绪分析，返回详细信息
+            if "method" in emotion_data:
+                response_data["emotion_method"] = emotion_data["method"]
+                if "details" in emotion_data:
+                    response_data["emotion_details"] = emotion_data["details"]
+
+            return jsonify(response_data)
         else:
             return jsonify({
                 "success": False,
@@ -1268,10 +1381,45 @@ def transcribe_audio():
                     "tempo": features.get("tempo", 0),
                     "energy": features.get("energy", 0),
                     "shimmer": features.get("shimmer", 0),
-                    "duration": features.get("duration", 0)
+                    "duration": features.get("duration", 0),
+                    "success": features.get("success", False)
                 }
 
-                # 如果特征提取成功，打印解读信息
+                # 如果特征提取成功，分析语音情绪
+                if features.get("success") and VoiceConfig.ENABLE_VOICE_EMOTION:
+                    # 优先使用预训练模型
+                    if ser_system and ser_system.loaded:
+                        try:
+                            voice_emotion_result = ser_system.predict(audio_path)
+                            if voice_emotion_result.get("success"):
+                                voice_emotion = {
+                                    "emotion": voice_emotion_result["emotion"],
+                                    "confidence": voice_emotion_result["confidence"],
+                                    "method": "pretrained_model",
+                                    "raw_emotion": voice_emotion_result.get("raw_emotion")
+                                }
+                                response_data["voice_emotion"] = voice_emotion
+                                print(f"[ASR] 语音情绪分析 (预训练模型): {voice_emotion}")
+                            else:
+                                # 模型失败，使用规则方法
+                                voice_emotion = voice_features_to_emotion(features)
+                                voice_emotion["method"] = "rule_based"
+                                response_data["voice_emotion"] = voice_emotion
+                                print(f"[ASR] 语音情绪分析 (规则): {voice_emotion}")
+                        except Exception as e:
+                            print(f"[ERROR] SER模型预测失败: {e}，使用规则方法")
+                            voice_emotion = voice_features_to_emotion(features)
+                            voice_emotion["method"] = "rule_based"
+                            response_data["voice_emotion"] = voice_emotion
+                            print(f"[ASR] 语音情绪分析 (规则): {voice_emotion}")
+                    else:
+                        # 无SER模型，使用规则方法
+                        voice_emotion = voice_features_to_emotion(features)
+                        voice_emotion["method"] = "rule_based"
+                        response_data["voice_emotion"] = voice_emotion
+                        print(f"[ASR] 语音情绪分析 (规则): {voice_emotion}")
+
+                # 打印心理健康评估信息
                 if features.get("success"):
                     from voice_features import interpret_features
                     interpretation = interpret_features(features)
@@ -1288,31 +1436,10 @@ def transcribe_audio():
 @app.route('/api/chat/multimodal-sentiment', methods=['POST'])
 @login_required
 def analyze_multimodal_sentiment():
-    """
-    多模态情绪分析API（支持动态权重融合）
+    """多模态情绪分析API"""
+    if current_user.is_counselor():
+        return jsonify({"error": "心理咨询师不能使用此功能"}), 403
 
-    接收:
-        text: 用户输入的文本（来自ASR或直接输入）
-        audio_features: (可选) 语音特征字典
-        audio_path: (可选) 音频文件路径
-
-    返回:
-        {
-            "success": true,
-            "overall_sentiment": "negative",
-            "confidence": 0.89,
-            "text_contribution": 0.75,
-            "voice_contribution": 0.92,
-            "depression_risk": 0.75,
-            "fusion_details": {
-                "text_weight": 0.35,
-                "voice_weight": 0.65,
-                "weight_explanation": [...]
-            },
-            "audio_quality": {...},
-            "risk_indicators": {...}
-        }
-    """
     try:
         data = request.get_json()
         text = data.get('text', '')
@@ -1363,26 +1490,10 @@ def analyze_multimodal_sentiment():
 @app.route('/api/chat/feedback', methods=['POST'])
 @login_required
 def submit_chat_feedback():
-    """
-    提交对话反馈API - 用于RLHF轻量级实现
+    """提交对话反馈API - 用于RLHF轻量级实现"""
+    if current_user.is_counselor():
+        return jsonify({"error": "心理咨询师不能使用此功能"}), 403
 
-    接收:
-        chat_message_id: 对话消息ID
-        feedback_type: 反馈类型 ('positive' 或 'negative')
-        feedback_reason: 反馈原因（可选）
-            - 'helpful': 有帮助
-            - 'inappropriate': 内容不当
-            - 'inaccurate': 理解错误
-            - 'unclear': 不够清晰
-            - 'other': 其他
-        feedback_text: 详细反馈文本（可选）
-
-    返回:
-        {
-            "success": true,
-            "feedback_id": 123
-        }
-    """
     try:
         data = request.get_json()
         chat_message_id = data.get('chat_message_id')
@@ -1454,706 +1565,377 @@ def submit_chat_feedback():
         return jsonify({'error': str(e)}), 500
 
 
-# ==================== 量表相关 API ====================
+# ==================== 心理咨询师仪表盘 API ====================
 
-@app.route('/api/scale/<scale_id>')
-def get_scale_data(scale_id):
-    """获取量表数据"""
-    scale_info = ScaleManager.get_scale_info(scale_id)
-    if not scale_info:
-        return jsonify({"error": "量表不存在"}), 404
+def calculate_user_status(patient):
+    """计算用户状态"""
+    from datetime import timedelta
 
-    return jsonify({
-        "info": {
-            "name": scale_info["name"],
-            "full_name": scale_info["full_name"],
-            "description": scale_info["description"],
-            "target_population": scale_info["target_population"],
-            "time_required": scale_info["time_required"],
-            "icon": scale_info["icon"]
-        },
-        "questions": scale_info["questions"]
-    })
+    # 获取最近对话
+    latest_chat = ChatMessage.query.filter_by(user_id=patient.id)\
+        .order_by(ChatMessage.created_at.desc())\
+        .first()
 
+    if not latest_chat:
+        return {"status": "inactive", "label": "未活跃", "color": "gray"}
 
-@app.route('/api/scale/submit', methods=['POST'])
-def submit_scale_answers():
-    """提交量表答案"""
+    days_since = (datetime.now() - latest_chat.created_at).days
+
+    # 检查是否有近期危机事件
     try:
-        data = request.json
-        scale_id = data.get('scale_id')
-        answers = data.get('answers')
+        crisis_storage = crisis_detector.storage if crisis_detector else None
+        if crisis_storage:
+            recent_crisis = crisis_storage.get_unhandled_events(user_id=patient.id)
+            if recent_crisis:
+                return {"status": "crisis", "label": "危机预警", "color": "red"}
+    except:
+        pass
 
-        if not scale_id or not answers:
-            return jsonify({"error": "缺少必要参数"}), 400
-
-        # 将字符串键转换为整数（JSON序列化会将键转为字符串）
-        answers = {int(k): v for k, v in answers.items()}
-
-        # 验证量表ID
-        scale_info = ScaleManager.get_scale_info(scale_id)
-        if not scale_info:
-            return jsonify({"error": "量表不存在"}), 404
-
-        # 验证答案完整性
-        if not ScaleManager.validate_answers(scale_id, answers):
-            # 找出未回答的问题
-            missing_questions = []
-            for question in scale_info["questions"]:
-                if question["id"] not in answers:
-                    missing_questions.append(question["id"])
-            return jsonify({
-                "error": f"答案不完整，还有 {len(missing_questions)} 道题未回答"
-            }), 400
-
-        # 计算分数
-        result = ScaleManager.calculate_score(scale_id, answers)
-
-        # 生成结果详情
-        answers_detail = []
-        for question in scale_info["questions"]:
-            question_id = question["id"]
-            answer_value = answers.get(question_id)
-
-            # 找到对应的选项文本
-            option_text = "未回答"
-            for option in question["options"]:
-                if option["value"] == answer_value:
-                    option_text = option["text"]
-                    break
-
-            answers_detail.append({
-                "question_id": question_id,
-                "question": question["question"],
-                "answer": option_text,
-                "score": answer_value
-            })
-
-        # 保存评估结果到数据库
-        import uuid
-        result_id = str(uuid.uuid4())
-
-        # 创建数据库记录
-        assessment_result = AssessmentResult(
-            result_id=result_id,
-            user_id=current_user.id if current_user.is_authenticated else None,
-            assessment_type='single'
-        )
-
-        # 准备结果数据
-        result_data = {
-            "scale_id": scale_id,
-            "result": result,
-            "answers_detail": answers_detail,
-            "timestamp": datetime.now().isoformat()
-        }
-        assessment_result.set_results(result_data)
-
-        db.session.add(assessment_result)
-        db.session.commit()
-
-        return jsonify({
-            "success": True,
-            "result_id": result_id,
-            "result": result
-        })
-
-    except Exception as e:
-        db.session.rollback()
-        print(f"提交答案错误: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+    # 根据活跃度和情绪判断状态
+    if days_since <= 1:
+        return {"status": "active", "label": "活跃", "color": "green"}
+    elif days_since <= 7:
+        return {"status": "normal", "label": "正常", "color": "blue"}
+    else:
+        return {"status": "inactive", "label": "长期未活跃", "color": "orange"}
 
 
-@app.route('/api/scale/result/<result_id>')
-def get_scale_result(result_id):
-    """获取量表结果"""
-    assessment = AssessmentResult.query.filter_by(result_id=result_id).first()
+def get_patient_emotion_trend(patient_id, days=7):
+    """获取患者情绪趋势"""
+    from datetime import timedelta
+    from sqlalchemy import func
 
-    if not assessment:
-        return jsonify({"error": "结果不存在"}), 404
+    start_date = datetime.now() - timedelta(days=days)
 
-    # 验证用户权限（如果有用户登录）
-    if current_user.is_authenticated and assessment.user_id != current_user.id:
-        return jsonify({"error": "无权访问此结果"}), 403
+    # 按天统计情绪
+    emotions = db.session.query(
+        func.date(ChatMessage.created_at).label('date'),
+        ChatMessage.emotion,
+        func.count(ChatMessage.id).label('count')
+    ).filter(
+        ChatMessage.user_id == patient_id,
+        ChatMessage.created_at >= start_date
+    ).group_by(
+        func.date(ChatMessage.created_at),
+        ChatMessage.emotion
+    ).all()
 
-    # 解析结果数据
-    result_data = assessment.get_results()
-    result_data['result_id'] = result_id
+    trend = {}
+    for date, emotion, count in emotions:
+        date_str = date.strftime('%Y-%m-%d')
+        if date_str not in trend:
+            trend[date_str] = {'positive': 0, 'negative': 0, 'neutral': 0}
+        trend[date_str][emotion] = count
 
-    return jsonify(result_data)
-
-
-@app.route('/api/scales/list')
-def list_scales():
-    """获取所有量表列表"""
-    scales = ScaleManager.get_all_scales()
-    scale_list = []
-
-    for scale_id, info in scales.items():
-        scale_list.append({
-            "id": scale_id,
-            "name": info["name"],
-            "full_name": info["full_name"],
-            "description": info["description"],
-            "target_population": info["target_population"],
-            "time_required": info["time_required"],
-            "icon": info["icon"],
-            "question_count": len(info["questions"])
-        })
-
-    return jsonify({"scales": scale_list})
+    return trend
 
 
-@app.route('/api/scale/comprehensive', methods=['POST'])
-def submit_comprehensive_assessment():
-    """提交综合评估（所有量表）"""
-    try:
-        data = request.json
-        answers_dict = data.get('answers')
-
-        if not answers_dict:
-            return jsonify({"error": "缺少答案数据"}), 400
-
-        results = []
-        detailed_results = []
-        scale_info_map = ScaleManager.get_all_scales()
-
-        # 处理每个量表
-        for scale_id, answers in answers_dict.items():
-            # 将字符串键转换为整数
-            answers = {int(k): v for k, v in answers.items()}
-
-            # 验证量表
-            scale_info = scale_info_map.get(scale_id)
-            if not scale_info:
-                return jsonify({"error": f"量表 {scale_id} 不存在"}), 404
-
-            # 验证答案完整性
-            if not ScaleManager.validate_answers(scale_id, answers):
-                return jsonify({"error": f"{scale_info['name']} 量表答案不完整"}), 400
-
-            # 计算分数
-            result = ScaleManager.calculate_score(scale_id, answers)
-            result['scale_id'] = scale_id
-            result['icon'] = scale_info['icon']
-            results.append(result)
-
-            # 生成详细答案
-            answers_detail = []
-            for question in scale_info["questions"]:
-                question_id = question["id"]
-                answer_value = answers.get(question_id)
-
-                option_text = "未回答"
-                for option in question["options"]:
-                    if option["value"] == answer_value:
-                        option_text = option["text"]
-                        break
-
-                answers_detail.append({
-                    "question_id": question_id,
-                    "question": question["question"],
-                    "answer": option_text,
-                    "score": answer_value
-                })
-
-            detailed_results.append({
-                "scale_id": scale_id,
-                "scale_name": result["scale_name"],
-                "answers_detail": answers_detail
-            })
-
-        # 保存综合评估结果到数据库
-        import uuid
-        result_id = str(uuid.uuid4())
-
-        # 创建数据库记录
-        assessment_result = AssessmentResult(
-            result_id=result_id,
-            user_id=current_user.id if current_user.is_authenticated else None,
-            assessment_type='comprehensive'
-        )
-
-        # 准备结果数据
-        result_data = {
-            "results": results,
-            "detailed_results": detailed_results,
-            "timestamp": datetime.now().isoformat()
-        }
-        assessment_result.set_results(result_data)
-
-        db.session.add(assessment_result)
-        db.session.commit()
-
-        return jsonify({
-            "success": True,
-            "result_id": result_id
-        })
-
-    except Exception as e:
-        db.session.rollback()
-        print(f"综合评估提交错误: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/scale/comprehensive-result/<result_id>')
-def get_comprehensive_result(result_id):
-    """获取综合评估结果"""
-    assessment = AssessmentResult.query.filter_by(result_id=result_id).first()
-
-    if not assessment:
-        return jsonify({"error": "结果不存在"}), 404
-
-    # 验证用户权限（如果有用户登录）
-    if current_user.is_authenticated and assessment.user_id != current_user.id:
-        return jsonify({"error": "无权访问此结果"}), 403
-
-    # 解析结果数据
-    result_data = assessment.get_results()
-    result_data['result_id'] = result_id
-    result_data['timestamp'] = assessment.created_at.isoformat()
-
-    return jsonify(result_data)
-
-
-@app.route('/api/scale/generate-ai-report/<result_id>')
+@app.route('/api/counselor/dashboard/stats')
 @login_required
-def generate_ai_report(result_id):
-    """
-    使用AI动态生成评估报告
+def get_dashboard_stats():
+    """获取仪表盘统计数据（仅咨询师）"""
+    if not current_user.is_counselor():
+        return jsonify({"error": "无权访问"}), 403
 
-    基于评估结果，使用MindChat模型生成个性化的综合分析报告
-    """
     try:
-        assessment = AssessmentResult.query.filter_by(result_id=result_id).first()
+        from datetime import timedelta, date
 
-        if not assessment:
-            return jsonify({"error": "结果不存在"}), 404
+        # 用户总数
+        total_patients = User.query.filter_by(role='patient').count()
 
-        # 验证用户权限
-        if assessment.user_id != current_user.id:
-            return jsonify({"error": "无权访问此结果"}), 403
+        # 今日活跃用户（24小时内有对话）
+        yesterday = datetime.now() - timedelta(days=1)
+        today_active = db.session.query(ChatMessage.user_id)\
+            .filter(ChatMessage.created_at >= yesterday)\
+            .distinct()\
+            .count()
 
-        # 解析结果数据
-        result_data = assessment.get_results()
+        # 危机预警用户
+        crisis_count = 0
+        try:
+            if crisis_detector and crisis_detector.storage:
+                crisis_events = crisis_detector.storage.get_unhandled_events()
+                # 获取唯一用户数
+                crisis_users = set(event.user_id for event in crisis_events)
+                crisis_count = len(crisis_users)
+        except:
+            pass
 
-        # 构建prompt，让AI生成报告
-        prompt = f"""请基于以下心理评估结果，生成一份温暖、亲切、易懂的个人健康报告。
-
-## 评估结果概况：
-
-"""
-
-        # 添加每个量表的评估结果
-        for scale_result in result_data.get('results', []):
-            scale_name = scale_result.get('scale_name', '未知量表')
-            score = scale_result.get('total_score', 0)
-            max_score = scale_result.get('max_score', 0)
-            severity = scale_result.get('severity', '未知')
-            level = scale_result.get('level', '未知')
-
-            prompt += f"""
-### {scale_name}
-- 得分：{score}/{max_score}
-- 状态：{severity}
-"""
-
-        prompt += """
-
-## 要求：
-
-请生成一份**写给用户自己看的**贴心报告，就像一位关心的朋友在和TA聊天：
-
-**重要原则**：
-- 用第二人称"您"直接对话，不要用"用户""受测者"等冷冰冰的词
-- 像朋友聊天一样自然，不要像医疗报告那样严肃
-- 多给予鼓励和肯定，少用专业术语
-- 强调积极的一面和改善的可能性，而不是只指出问题
-
-**报告内容**：
-
-1. **🌟 给您的拥抱**（150-200字）：
-   - 用温暖的语气回应评估结果
-   - 肯定TA关注自己心理健康的积极行为
-   - 让TA感受到被理解和支持
-
-2. **💡 一起看看结果**（300-400字）：
-   - 用生活化的语言解释各项评估结果
-   - 帮助TA理解这些数字背后的含义
-   - 指出积极方面和需要关注的地方
-   - 不要制造焦虑，而是理性客观地说明情况
-
-3. **🌱 我们可以这样做**（300-400字）：
-   - 给出2-3个具体、简单、可操作的小建议
-   - 用"建议您..."而不是"应该..."的语气
-   - 包含日常生活中的小改变（睡眠、运动、社交等）
-   - 说明什么时候需要寻求专业帮助（用轻松的方式表达）
-
-4. **💪 您并不孤单**（100-150字）：
-   - 温暖的鼓励话语
-   - 强调改善是可以实现的
-   - 传递希望和信心
-   - 让TA感受到支持的力量
-
-**语气要求**：
-- 温暖、亲切、真诚
-- 避免使用"患者""症状""诊断""治疗"等医疗词汇
-- 多用"感受""状态""心情""调整"等生活化词汇
-- 适当使用emoji增加亲和力（🌟💡🌱💪😊等）
-
-请使用markdown格式输出。
-"""
-
-        # 使用MindChat生成报告
-        if mindchat_system is None:
-            return jsonify({
-                "success": False,
-                "error": "AI对话系统未加载，无法生成报告"
-            }), 500
-
-        # 对于报告生成，使用更大的max_length（2048 tokens，约1500-2000中文字）
-        result = mindchat_system.mindchat.chat(
-            prompt,
-            system_prompt="你是一位温暖亲切的心理健康陪伴者，擅长用朋友般的语气和用户交流，让用户感受到被理解、被关心、被支持。你写的报告不是冷冰冰的医疗报告，而是充满温度的贴心话。请生成完整的分析报告，不要截断。",
-            max_length=2048,  # 设置更大的生成长度
-            temperature=0.8,
-            user_id=current_user.id
-        )
-
-        # 构造返回结果
-        ai_report = result if isinstance(result, str) else str(result)
-
-        return jsonify({
-            "success": True,
-            "ai_report": ai_report,
-            "generated_at": datetime.now().isoformat()
-        })
-
-    except Exception as e:
-        print(f"生成AI报告错误: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
-
-
-@app.route('/api/generate-trend-ai-report', methods=['POST'])
-@login_required
-def generate_trend_ai_report():
-    """
-    生成趋势分析AI报告
-
-    基于用户的历史评估数据和对话数据，使用AI生成趋势分析报告
-    """
-    try:
-        data = request.json
-        prompt = data.get('prompt', '')
-        trend_data = data.get('trend_data', {})
-
-        if not prompt:
-            return jsonify({
-                "success": False,
-                "error": "缺少prompt参数"
-            }), 400
-
-        # 使用MindChat生成报告
-        if mindchat_system is None:
-            return jsonify({
-                "success": False,
-                "error": "AI对话系统未加载，无法生成报告"
-            }), 500
-
-        # 对于趋势分析报告生成，使用更大的max_length（2048 tokens）
-        result = mindchat_system.mindchat.chat(
-            prompt,
-            system_prompt="你是一位温暖亲切的心理健康陪伴者，擅长用朋友般的语气和用户交流，让用户感受到被理解、被关心、被支持。你写的报告不是冷冰冰的分析报告，而是充满温度的贴心话，就像一位关心的朋友在和TA回顾这段旅程。请生成完整的分析报告，不要截断。",
-            max_length=2048,  # 设置更大的生成长度
-            temperature=0.8,
-            user_id=current_user.id
-        )
-
-        # 构造返回结果
-        ai_report = result if isinstance(result, str) else str(result)
-
-        return jsonify({
-            "success": True,
-            "ai_report": ai_report,
-            "generated_at": datetime.now().isoformat()
-        })
-
-    except Exception as e:
-        print(f"生成趋势AI报告错误: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
-
-
-# ==================== 个性化疗愈策略系统 ====================
-
-@app.route('/api/strategy/get')
-@login_required
-def get_strategy():
-    """获取用户的疗愈策略"""
-    try:
-        from personalized_healing import StrategyRecommender
-
-        recommender = StrategyRecommender(current_user.id)
-        strategy = recommender.generate_strategy_report()
+        # 本周新用户
+        week_ago = datetime.now() - timedelta(days=7)
+        new_week_patients = User.query.filter(
+            User.role == 'patient',
+            User.created_at >= week_ago
+        ).count()
 
         return jsonify({
             'success': True,
-            'data': strategy
+            'stats': {
+                'total_patients': total_patients,
+                'today_active': today_active,
+                'crisis_warning': crisis_count,
+                'new_week_patients': new_week_patients
+            }
         })
+
     except Exception as e:
-        print(f"获取策略错误: {e}")
+        print(f"获取仪表盘统计错误: {e}")
         import traceback
         traceback.print_exc()
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return jsonify({"error": "获取统计数据失败"}), 500
 
 
-@app.route('/api/strategy/profile')
+@app.route('/api/counselor/patients/enhanced')
 @login_required
-def get_user_profile():
-    """获取用户画像"""
+def get_all_patients_enhanced():
+    """获取所有患者列表（增强版，含状态标签）"""
+    if not current_user.is_counselor():
+        return jsonify({"error": "无权访问"}), 403
+
     try:
-        # 首先尝试从数据库获取已保存的策略
-        strategy_profile = UserStrategyProfile.query.filter_by(user_id=current_user.id).first()
+        patients = User.query.filter_by(role='patient').order_by(User.created_at.desc()).all()
 
-        if strategy_profile and strategy_profile.preferred_style:
-            # 如果有已保存的策略，直接使用
-            profile = {
-                'user_id': current_user.id,
-                'recommended_style': strategy_profile.preferred_style,
-                'depression_level': {
-                    'level': strategy_profile.depression_level or 'unknown',
-                    'level_name': strategy_profile.depression_level or '未知'
-                },
-                'trend': {
-                    'status': strategy_profile.trend_status or 'new_user',
-                    'status_name': strategy_profile.trend_status or '新用户'
-                }
-            }
+        patient_list = []
+        for patient in patients:
+            # 计算年龄
+            age = None
+            if patient.birth_date:
+                today = date.today()
+                age = today.year - patient.birth_date.year - (
+                    (today.month, today.day) < (patient.birth_date.month, patient.birth_date.day)
+                )
 
-            # 如果有完整画像数据，使用它
-            if strategy_profile.profile_data:
-                try:
-                    import json
-                    full_profile = json.loads(strategy_profile.profile_data)
-                    profile.update(full_profile)
-                except:
-                    pass
+            # 获取最近对话
+            latest_chat = ChatMessage.query.filter_by(user_id=patient.id)\
+                .order_by(ChatMessage.created_at.desc())\
+                .first()
 
-            print(f"✓ 从数据库加载用户 {current_user.id} 的策略: {strategy_profile.preferred_style}")
+            # 计算用户状态
+            status_info = calculate_user_status(patient)
+
+            # 获取对话总数
+            chat_count = ChatMessage.query.filter_by(user_id=patient.id).count()
+
+            # 获取最近情绪
+            recent_emotion = None
+            if latest_chat:
+                recent_emotion = latest_chat.emotion
+
+            patient_list.append({
+                'id': patient.id,
+                'username': patient.username,
+                'email': patient.email,
+                'age': age,
+                'created_at': patient.created_at.strftime('%Y-%m-%d') if patient.created_at else None,
+                'last_login': patient.last_login.strftime('%Y-%m-%d %H:%M') if patient.last_login else None,
+                'chat_count': chat_count,
+                'latest_chat_date': latest_chat.created_at.strftime('%Y-%m-%d %H:%M') if latest_chat else None,
+                'status': status_info,
+                'recent_emotion': recent_emotion
+            })
+
+        return jsonify({
+            'success': True,
+            'patients': patient_list,
+            'total': len(patient_list)
+        })
+
+    except Exception as e:
+        print(f"获取患者列表错误: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": "获取患者列表失败"}), 500
+
+
+@app.route('/api/counselor/patient/<int:patient_id>/emotion-trend')
+@login_required
+def get_patient_emotion_trend_api(patient_id):
+    """获取患者情绪趋势"""
+    if not current_user.is_counselor():
+        return jsonify({"error": "无权访问"}), 403
+
+    try:
+        days = request.args.get('days', 7, type=int)
+        trend = get_patient_emotion_trend(patient_id, days)
+
+        return jsonify({
+            'success': True,
+            'trend': trend
+        })
+
+    except Exception as e:
+        print(f"获取情绪趋势错误: {e}")
+        return jsonify({"error": "获取情绪趋势失败"}), 500
+
+
+@app.route('/api/counselor/patient/<int:patient_id>/notes', methods=['GET', 'POST'])
+@login_required
+def counselor_notes_api(patient_id):
+    """咨询师建议API"""
+    if not current_user.is_counselor():
+        return jsonify({"error": "无权访问"}), 403
+
+    # 验证患者存在
+    patient = User.query.filter_by(id=patient_id, role='patient').first()
+    if not patient:
+        return jsonify({"error": "患者不存在"}), 404
+
+    if request.method == 'GET':
+        """获取患者的所有建议"""
+        try:
+            notes = CounselorNote.query.filter_by(user_id=patient_id)\
+                .order_by(CounselorNote.created_at.desc())\
+                .all()
+
             return jsonify({
                 'success': True,
-                'data': profile
+                'notes': [note.to_dict() for note in notes]
             })
-        else:
-            # 如果没有保存的策略，生成新的
-            from personalized_healing import UserProfiler
-            profiler = UserProfiler(current_user.id)
-            profile = profiler.generate_profile()
 
-            # 保存到数据库
-            if not strategy_profile:
-                strategy_profile = UserStrategyProfile(user_id=current_user.id)
-                db.session.add(strategy_profile)
+        except Exception as e:
+            print(f"获取建议错误: {e}")
+            return jsonify({"error": "获取建议失败"}), 500
 
-            strategy_profile.preferred_style = profile.get('recommended_style', 'guidance')
-            strategy_profile.depression_level = profile['depression_level'].get('level', 'unknown')
-            strategy_profile.trend_status = profile['trend'].get('status', 'new_user')
-            strategy_profile.set_profile(profile)
+    elif request.method == 'POST':
+        """添加新建议"""
+        try:
+            data = request.json
+            note_type = data.get('note_type', 'suggestion')
+            note_content = data.get('note', '').strip()
 
+            if not note_content:
+                return jsonify({"error": "建议内容不能为空"}), 400
+
+            valid_types = ['suggestion', 'observation', 'warning', 'encouragement']
+            if note_type not in valid_types:
+                return jsonify({"error": "无效的建议类型"}), 400
+
+            new_note = CounselorNote(
+                user_id=patient_id,
+                counselor_id=current_user.id,
+                note_type=note_type,
+                note=note_content
+            )
+
+            db.session.add(new_note)
             db.session.commit()
 
-            print(f"✓ 生成并保存用户 {current_user.id} 的新策略: {strategy_profile.preferred_style}")
+            print(f"[NOTE] 咨询师 {current_user.username} 给患者 {patient.username} 添加建议: {note_type}")
+
             return jsonify({
                 'success': True,
-                'data': profile
+                'note': new_note.to_dict()
             })
 
-    except Exception as e:
-        print(f"获取用户画像错误: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        except Exception as e:
+            print(f"添加建议错误: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({"error": "添加建议失败"}), 500
 
 
-@app.route('/api/strategy/update-profile', methods=['POST'])
+@app.route('/api/counselor/patient/<int:patient_id>/recent-chats')
 @login_required
-def update_strategy_profile():
-    """更新用户画像（完成评估后调用）"""
+def get_patient_recent_chats(patient_id):
+    """获取患者最近的对话记录"""
+    if not current_user.is_counselor():
+        return jsonify({"error": "无权访问"}), 403
+
     try:
-        from personalized_healing import UserProfiler
+        limit = request.args.get('limit', 20, type=int)
+        offset = request.args.get('offset', 0, type=int)
 
-        profiler = UserProfiler(current_user.id)
-        profile = profiler.generate_profile()
-
-        # 保存或更新到数据库
-        strategy_profile = UserStrategyProfile.query.filter_by(user_id=current_user.id).first()
-
-        if not strategy_profile:
-            strategy_profile = UserStrategyProfile(user_id=current_user.id)
-
-        strategy_profile.depression_level = profile['depression_level'].get('level', 'unknown')
-        strategy_profile.trend_status = profile['trend'].get('status', 'new_user')
-        strategy_profile.preferred_style = profile.get('recommended_style', 'guidance')
-        strategy_profile.set_profile(profile)
-
-        db.session.add(strategy_profile)
-        db.session.commit()
+        chats = ChatMessage.query.filter_by(user_id=patient_id)\
+            .order_by(ChatMessage.created_at.desc())\
+            .limit(limit)\
+            .offset(offset)\
+            .all()
 
         return jsonify({
             'success': True,
-            'data': profile
+            'chats': [chat.to_dict() for chat in chats],
+            'total': ChatMessage.query.filter_by(user_id=patient_id).count()
         })
+
     except Exception as e:
-        db.session.rollback()
-        print(f"更新用户画像错误: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        print(f"获取对话记录错误: {e}")
+        return jsonify({"error": "获取对话记录失败"}), 500
 
 
-@app.route('/api/strategy/set-style', methods=['POST'])
+@app.route('/api/counselor/patient/<int:patient_id>/export-report')
 @login_required
-def set_conversation_style():
-    """用户手动设置对话风格"""
+def export_patient_report(patient_id):
+    """导出用户报告（仅咨询师）"""
+    if not current_user.is_counselor():
+        return jsonify({"error": "无权访问"}), 403
+
     try:
-        data = request.json
-        style_id = data.get('style_id')
+        from counselor_report_generator import CounselorReportGenerator
+        from flask import Response
 
-        if not style_id:
-            return jsonify({'error': '缺少 style_id 参数'}), 400
+        # 验证患者存在
+        patient = User.query.filter_by(id=patient_id, role='patient').first()
+        if not patient:
+            return jsonify({"error": "患者不存在"}), 404
 
-        # 验证 style_id 是否有效
-        valid_styles = ['empathetic', 'guidance', 'solution_focused', 'auto']
-        if style_id not in valid_styles:
-            return jsonify({'error': f'无效的 style_id，必须是: {", ".join(valid_styles)}'}), 400
+        # 生成报告
+        generator = CounselorReportGenerator(patient_id)
+        html_content = generator.export_to_html()
 
-        # 获取或创建用户策略画像
-        strategy_profile = UserStrategyProfile.query.filter_by(user_id=current_user.id).first()
+        # 记录导出操作
+        view_record = CounselorViewRecord(
+            counselor_id=current_user.id,
+            user_id=patient_id
+        )
+        db.session.add(view_record)
+        db.session.commit()
 
-        if not strategy_profile:
-            strategy_profile = UserStrategyProfile(user_id=current_user.id)
-            db.session.add(strategy_profile)
-
-        # 保存用户选择
-        if style_id == 'auto':
-            # 自动模式：根据系统推荐
-            try:
-                from personalized_healing import UserProfiler
-                profiler = UserProfiler(current_user.id)
-                profile = profiler.generate_profile()
-                recommended_style = profile.get('recommended_style', 'guidance')
-
-                strategy_profile.preferred_style = recommended_style
-                strategy_profile.depression_level = profile['depression_level'].get('level', 'unknown')
-                strategy_profile.trend_status = profile['trend'].get('status', 'new_user')
-                strategy_profile.set_profile(profile)
-
-                style_name = '自动推荐'
-            except Exception as e:
-                print(f"生成自动推荐失败: {e}")
-                strategy_profile.preferred_style = 'guidance'
-                style_name = '自动推荐'
-        else:
-            # 手动选择特定风格
-            strategy_profile.preferred_style = style_id
-
-            # 更新 profile JSON
-            try:
-                profile = strategy_profile.get_profile()
-                if not profile:
-                    profile = {}
-                profile['manual_style_override'] = style_id
-                profile['manual_override_time'] = datetime.now().isoformat()
-                strategy_profile.set_profile(profile)
-            except Exception as e:
-                print(f"更新 profile 失败: {e}")
-
-            # 风格名称映射
-            style_names = {
-                'empathetic': '共情型',
-                'guidance': '指导型',
-                'solution_focused': '解决型'
+        # 返回HTML文件
+        filename = f"陪伴状态报告_{patient.username}_{datetime.now().strftime('%Y%m%d')}.html"
+        return Response(
+            html_content,
+            mimetype='text/html',
+            headers={
+                'Content-Disposition': f'attachment; filename="{filename}"'
             }
-            style_name = style_names.get(style_id, style_id)
+        )
 
-        db.session.commit()
-
-        print(f"✓ 用户 {current_user.id} 切换策略到: {style_id} ({style_name})")
-
-        return jsonify({
-            'success': True,
-            'style_id': style_id,
-            'style_name': style_name,
-            'message': f'✓ 已切换到 {style_name}'
-        })
     except Exception as e:
-        db.session.rollback()
-        print(f"设置对话风格错误: {e}")
+        print(f"导出报告错误: {e}")
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({"error": "导出报告失败"}), 500
 
 
-@app.route('/api/strategy/styles')
+@app.route('/api/counselor/patient/<int:patient_id>/report-preview')
 @login_required
-def get_available_styles():
-    """获取所有可用的对话风格"""
+def preview_patient_report(patient_id):
+    """预览用户报告（JSON格式）"""
+    if not current_user.is_counselor():
+        return jsonify({"error": "无权访问"}), 403
+
     try:
-        from personalized_healing import UserProfile
+        from counselor_report_generator import CounselorReportGenerator
 
-        styles = []
-        for style_id, style_info in UserProfile.CONVERSATION_STYLES.items():
-            styles.append({
-                'id': style_id,
-                'name': style_info['name'],
-                'description': style_info['description']
-            })
+        # 验证患者存在
+        patient = User.query.filter_by(id=patient_id, role='patient').first()
+        if not patient:
+            return jsonify({"error": "患者不存在"}), 404
 
-        # 添加自动模式
-        styles.insert(0, {
-            'id': 'auto',
-            'name': '自动推荐',
-            'description': '根据你的评估结果自动选择最适合的对话风格'
-        })
+        # 生成报告
+        generator = CounselorReportGenerator(patient_id)
+        report_data = generator.generate_report()
 
         return jsonify({
             'success': True,
-            'styles': styles
+            'report': report_data
         })
+
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-
-@app.route('/strategy')
-@login_required
-def strategy_page():
-    """策略管理页面"""
-    return render_template('strategy_management.html')
+        print(f"预览报告错误: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": "预览报告失败"}), 500
 
 
 # ==================== 主程序 ====================
@@ -2170,10 +1952,10 @@ if __name__ == "__main__":
     initialize_models()
 
     # 启动Flask应用
-    print("\n🚀 启动服务器: http://127.0.0.1:5000")
+    print("\n[OK] 启动服务器: http://127.0.0.1:5000")
     app.run(
         host="127.0.0.1",
         port=5000,
-        debug=False,  # 关闭debug模式避免编码问题
+        debug=False,
         use_reloader=False
     )

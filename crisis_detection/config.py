@@ -19,9 +19,11 @@ class CrisisConfig:
     ENABLE_SCALE_DETECTION: bool = True
     
     # 分级阈值（置信度）
-    LEVEL_1_THRESHOLD: float = 0.3
-    LEVEL_2_THRESHOLD: float = 0.6
-    LEVEL_3_THRESHOLD: float = 0.85
+    # 注意：单个关键词的得分：low=0.15, medium=0.25, high=0.4
+    # 阈值应该确保单个关键词也能触发相应等级
+    LEVEL_1_THRESHOLD: float = 0.1   # 降低阈值，确保单个低危关键词(0.15)也能触发
+    LEVEL_2_THRESHOLD: float = 0.2   # 降低阈值，确保单个中危关键词(0.25)也能触发
+    LEVEL_3_THRESHOLD: float = 0.35  # 降低阈值，确保单个高危关键词(0.4)也能触发
     
     # 量表预警分数（PHQ-9 总分 0-27）
     PHQ9_WARNING_SCORE: int = 10
@@ -106,10 +108,10 @@ class CrisisConfig:
         config.USE_AI_GENERATION = os.getenv("CRISIS_USE_AI", "true").lower() == "true"
         config.ENABLE_RESOURCES = os.getenv("CRISIS_ENABLE_RESOURCES", "false").lower() == "true"
         
-        # 从环境变量覆盖阈值
-        config.LEVEL_1_THRESHOLD = float(os.getenv("CRISIS_LEVEL1", "0.3"))
-        config.LEVEL_2_THRESHOLD = float(os.getenv("CRISIS_LEVEL2", "0.6"))
-        config.LEVEL_3_THRESHOLD = float(os.getenv("CRISIS_LEVEL3", "0.85"))
+        # 从环境变量覆盖阈值（使用类定义中的默认值）
+        config.LEVEL_1_THRESHOLD = float(os.getenv("CRISIS_LEVEL1", str(config.LEVEL_1_THRESHOLD)))
+        config.LEVEL_2_THRESHOLD = float(os.getenv("CRISIS_LEVEL2", str(config.LEVEL_2_THRESHOLD)))
+        config.LEVEL_3_THRESHOLD = float(os.getenv("CRISIS_LEVEL3", str(config.LEVEL_3_THRESHOLD)))
         
         # 从环境变量覆盖量表分数
         config.PHQ9_WARNING_SCORE = int(os.getenv("CRISIS_PHQ9_WARNING", "10"))

@@ -15,16 +15,15 @@
                 <span class="logo-text">元气充能陪伴平台</span>
             </div>
             <ul class="nav-menu">
-                <li class="nav-item">
-                    <a href="/scales" class="nav-link">量表评估</a>
-                </li>
                 <li class="nav-item active">
                     <a href="/chat" class="nav-link">AI对话</a>
                 </li>
-                {% if current_user.is_authenticated %}
+                {% if current_user.is_authenticated and can_view_report %}
                 <li class="nav-item">
-                    <a href="/trend-analysis" class="nav-link">趋势分析</a>
+                    <a href="/report" class="nav-link">查看报告</a>
                 </li>
+                {% endif %}
+                {% if current_user.is_authenticated %}
                 <li class="nav-item">
                     <a href="/profile" class="nav-link user-name">{{ current_user.username }}</a>
                 </li>

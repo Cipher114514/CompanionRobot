@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>咨询师仪表盘 - 元气充能陪伴平台</title>
+    <link rel="stylesheet" href="/static/css/style.css?v=4">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #f5f7fa;
+            color: #333;
+        }
+
+        .dashboard-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 30px 20px;
+        }
+
+        /* 导航栏 */
+        .main-nav {
+            background: #ffffff;
+            border-bottom: 2px solid #e8e8e8;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        .nav-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            height: 60px;
+        }
+
+        .nav-logo {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .logo-icon {
+            font-size: 24px;
+        }
+
+        .logo-text {
+            font-size: 18px;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .nav-menu {
+            display: flex;
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            gap: 5px;
+        }
+
+        .nav-link {
+            text-decoration: none;
+            color: #555;
+            font-size: 15px;
+            padding: 8px 16px;
+            border-radius: 4px;
+            transition: all 0.2s;
+            font-weight: 500;
+        }
+
+        .nav-link:hover {
+            background: #f5f5f5;
+            color: #2c3e50;
+        }
+
+        .nav-cta {
+            background: #2c3e50;
+            color: #fff !important;
+        }
+
+        .nav-cta:hover {
+            background: #34495e;
+        }
+
+        /* 页面标题 */
+        .page-header {
+            margin-bottom: 30px;
+        }
+
+        .page-header h1 {
+            font-size: 28px;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        /* 统计卡片 */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+        }
+
+        .stat-label {
+            font-size: 14px;
+            color: #7f8c8d;
+            margin-bottom: 8px;
+        }
+
+        .stat-value {
+            font-size: 32px;
+            font-weight: 700;
+            color: #2c3e50;
+        }
+
+        /* 患者表格 */
+        .patients-section {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+            overflow: hidden;
+        }
+
+        .section-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid #ecf0f1;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .search-box {
+            display: flex;
+            gap: 10px;
+        }
+
+        .search-input {
+            padding: 8px 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            font-size: 14px;
+            width: 250px;
+        }
+
+        .table-container {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        thead {
+            background: #f8f9fa;
+        }
+
+        th {
+            padding: 14px 16px;
+            text-align: left;
+            font-weight: 600;
+            color: #2c3e50;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 2px solid #ecf0f1;
+        }
+
+        td {
+            padding: 14px 16px;
+            border-bottom: 1px solid #ecf0f1;
+            font-size: 14px;
+        }
+
+        tbody tr:hover {
+            background: #f8f9fa;
+        }
+
+        .action-link {
+            color: #3498db;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .action-link:hover {
+            text-decoration: underline;
+        }
+
+        .empty-state {
+            padding: 60px 20px;
+            text-align: center;
+            color: #95a5a6;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #7f8c8d;
+        }
+
+        /* 患者详情模态框 */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+        }
+
+        .modal-overlay.show {
+            display: flex;
+        }
+
+        .modal {
+            background: white;
+            border-radius: 8px;
+            max-width: 800px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+        }
+
+        .modal-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid #ecf0f1;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #95a5a6;
+        }
+
+        .modal-close:hover {
+            color: #2c3e50;
+        }
+
+        .modal-body {
+            padding: 24px;
+        }
+
+        .patient-info-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            margin-bottom: 24px;
+        }
+
+        .info-item {
+            background: #f8f9fa;
+            padding: 16px;
+            border-radius: 6px;
+        }
+
+        .info-label {
+            font-size: 12px;
+            color: #7f8c8d;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+        }
+
+        .info-value {
+            font-size: 18px;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .emotion-summary {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-bottom: 24px;
+        }
+
+        .emotion-card {
+            padding: 16px;
+            border-radius: 6px;
+            text-align: center;
+        }
+
+        .emotion-positive {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .emotion-negative {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .emotion-neutral {
+            background: #e2e3e5;
+            color: #383d41;
+        }
+
+        .chat-history {
+            margin-top: 24px;
+        }
+
+        .chat-item {
+            padding: 12px;
+            border-left: 3px solid #3498db;
+            background: #f8f9fa;
+            margin-bottom: 10px;
+            border-radius: 0 4px 4px 0;
+        }
+
+        .chat-date {
+            font-size: 12px;
+            color: #7f8c8d;
+            margin-bottom: 4px;
+        }
+
+        .chat-message {
+            font-size: 14px;
+            color: #2c3e50;
+        }
+
+        .crisis-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            background: #f8d7da;
+            color: #721c24;
+            border-radius: 4px;
+            font-size: 11px;
+            margin-left: 8px;
+        }
+
+        /* 状态标签 */
+        .status-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .status-active {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-normal {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .status-inactive {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .status-crisis {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        /* 情绪标签 */
+        .emotion-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+
+        .emotion-positive {
+            background: #28a745;
+        }
+
+        .emotion-negative {
+            background: #dc3545;
+        }
+
+        .emotion-neutral {
+            background: #6c757d;
+        }
+
+        /* 咨询师建议区域 */
+        .notes-section {
+            margin-top: 24px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 6px;
+        }
+
+        .note-form {
+            margin-bottom: 16px;
+        }
+
+        .note-textarea {
+            width: 100%;
+            min-height: 80px;
+            padding: 10px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            font-size: 14px;
+            font-family: inherit;
+            resize: vertical;
+        }
+
+        .note-type-select {
+            padding: 8px 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        .btn-submit {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .btn-submit:hover {
+            background: #2980b9;
+        }
+
+        .btn-export {
+            background: #27ae60;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            margin-left: 10px;
+        }
+
+        .btn-export:hover {
+            background: #229954;
+        }
+
+        .btn-secondary {
+            background: #95a5a6;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .btn-secondary:hover {
+            background: #7f8c8d;
+        }
+
+        .modal-actions {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #ecf0f1;
+            text-align: right;
+        }
+
+        .note-item {
+            background: white;
+            padding: 12px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            border-left: 3px solid #3498db;
+        }
+
+        .note-meta {
+            font-size: 12px;
+            color: #7f8c8d;
+            margin-bottom: 6px;
+        }
+
+        .note-content {
+            font-size: 14px;
+            color: #2c3e50;
+        }
+    </style>
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="main-nav">
+        <div class="nav-container">
+            <div class="nav-logo">
+                <span class="logo-icon">🧠</span>
+                <span class="logo-text">元气充能陪伴平台</span>
+            </div>
+            <ul class="nav-menu">
+                <li><span class="nav-link">心理咨询师控制台</span></li>
+                <li><a href="/api/auth/logout" class="nav-link nav-cta">退出</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- 主内容 -->
+    <div class="dashboard-container">
+        <div class="page-header">
+            <h1>患者管理</h1>
+        </div>
+
+        <!-- 统计卡片 -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">总患者数</div>
+                <div class="stat-value" id="totalPatients">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">本周活跃</div>
+                <div class="stat-value" id="activePatients">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">危机干预</div>
+                <div class="stat-value" id="crisisCount" style="color: #e74c3c;">-</div>
+            </div>
+        </div>
+
+        <!-- 患者列表 -->
+        <div class="patients-section">
+            <div class="section-header">
+                <h2 class="section-title">患者列表</h2>
+                <div class="search-box">
+                    <input type="text" class="search-input" id="searchInput" placeholder="搜索用户名或邮箱...">
+                </div>
+            </div>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>用户名</th>
+                            <th>年龄</th>
+                            <th>状态</th>
+                            <th>最近情绪</th>
+                            <th>对话次数</th>
+                            <th>最近对话</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="patientsTableBody">
+                        <tr>
+                            <td colspan="7" class="loading">加载中...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- 患者详情模态框 -->
+    <div class="modal-overlay" id="patientModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">患者详情</h3>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- 动态加载内容 -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let allPatients = [];
+        let currentPatientId = null;
+
+        document.addEventListener('DOMContentLoaded', function() {
+            loadDashboardStats();
+            loadPatients();
+        });
+
+        // 搜索功能
+        document.getElementById('searchInput').addEventListener('input', function(e) {
+            const query = e.target.value.toLowerCase();
+            const filtered = allPatients.filter(p =>
+                p.username.toLowerCase().includes(query) ||
+                p.email.toLowerCase().includes(query)
+            );
+            renderPatients(filtered);
+        });
+
+        async function loadDashboardStats() {
+            try {
+                const response = await fetch('/api/counselor/dashboard/stats');
+                const data = await response.json();
+
+                if (data.success) {
+                    updateStats(data.stats);
+                }
+            } catch (error) {
+                console.error('加载统计数据失败:', error);
+            }
+        }
+
+        async function loadPatients() {
+            try {
+                const response = await fetch('/api/counselor/patients/enhanced');
+                const data = await response.json();
+
+                if (data.success) {
+                    allPatients = data.patients;
+                    renderPatients(allPatients);
+                } else {
+                    showError(data.error || '加载失败');
+                }
+            } catch (error) {
+                console.error('加载患者列表失败:', error);
+                showError('网络错误，请稍后重试');
+            }
+        }
+
+        function renderPatients(patients) {
+            const tbody = document.getElementById('patientsTableBody');
+
+            if (patients.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="empty-state">暂无患者记录</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = patients.map(patient => {
+                const status = patient.status || {};
+                const statusClass = `status-${status.status || 'inactive'}`;
+
+                const emotionClass = patient.recent_emotion ? `emotion-${patient.recent_emotion}` : '';
+                const emotionLabel = {
+                    'positive': '积极',
+                    'negative': '消极',
+                    'neutral': '平静'
+                }[patient.recent_emotion] || '-';
+
+                const latestDate = patient.latest_chat_date
+                    ? new Date(patient.latest_chat_date).toLocaleDateString('zh-CN')
+                    : '无';
+
+                return `
+                    <tr>
+                        <td><strong>${escapeHtml(patient.username)}</strong></td>
+                        <td>${patient.age || '-'}</td>
+                        <td><span class="status-badge ${statusClass}">${status.label || '未知'}</span></td>
+                        <td>
+                            ${emotionClass ? `<span class="emotion-dot ${emotionClass}"></span>` : ''}
+                            ${emotionLabel}
+                        </td>
+                        <td>${patient.chat_count}</td>
+                        <td>${latestDate}</td>
+                        <td>
+                            <a href="#" class="action-link" onclick="viewPatient(${patient.id}); return false;">查看详情</a>
+                            <button class="btn-secondary" onclick="exportReport(${patient.id}); return false;" style="margin-left: 8px;">导出报告</button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function updateStats(stats) {
+            document.getElementById('totalPatients').textContent = stats.total_patients || 0;
+            document.getElementById('activePatients').textContent = stats.today_active || 0;
+            document.getElementById('crisisCount').textContent = stats.crisis_warning || 0;
+        }
+
+        async function viewPatient(patientId) {
+            currentPatientId = patientId;
+            try {
+                // 加载患者详情
+                const response = await fetch(`/api/counselor/patient/${patientId}`);
+                const data = await response.json();
+
+                if (data.success) {
+                    showPatientDetail(data);
+                } else {
+                    showError(data.error || '加载失败');
+                }
+            } catch (error) {
+                console.error('加载患者详情失败:', error);
+                showError('网络错误，请稍后重试');
+            }
+        }
+
+        async function showPatientDetail(data) {
+            const modal = document.getElementById('patientModal');
+            const modalBody = document.getElementById('modalBody');
+
+            const patient = data.patient;
+            const chats = data.recent_chats || [];
+
+            // 加载咨询师建议
+            let notesHtml = '';
+            try {
+                const notesResponse = await fetch(`/api/counselor/patient/${currentPatientId}/notes`);
+                const notesData = await notesResponse.json();
+
+                if (notesData.success && notesData.notes.length > 0) {
+                    notesHtml = notesData.notes.map(note => `
+                        <div class="note-item">
+                            <div class="note-meta">
+                                ${escapeHtml(note.counselor_name)} · ${new Date(note.created_at).toLocaleString('zh-CN')}
+                            </div>
+                            <div class="note-content">${escapeHtml(note.note)}</div>
+                        </div>
+                    `).join('');
+                } else {
+                    notesHtml = '<div style="color: #7f8c8d; text-align: center; padding: 20px;">暂无建议记录</div>';
+                }
+            } catch (error) {
+                console.error('加载建议失败:', error);
+                notesHtml = '<div style="color: #7f8c8d; text-align: center; padding: 20px;">加载失败</div>';
+            }
+
+            modalBody.innerHTML = `
+                <div class="patient-info-grid">
+                    <div class="info-item">
+                        <div class="info-label">用户名</div>
+                        <div class="info-value">${escapeHtml(patient.username)}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">年龄</div>
+                        <div class="info-value">${patient.age || '-'}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">对话次数</div>
+                        <div class="info-value">${patient.chat_count || 0}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">危机干预</div>
+                        <div class="info-value" style="color: ${patient.crisis_count > 0 ? '#e74c3c' : '#27ae60'};">
+                            ${patient.crisis_count || 0} 次
+                        </div>
+                    </div>
+                </div>
+
+                <h4 style="margin-bottom: 12px;">情绪分布</h4>
+                <div class="emotion-summary">
+                    <div class="emotion-card emotion-positive">
+                        <div style="font-size: 24px; font-weight: 600;">${patient.emotion_counts.positive || 0}</div>
+                        <div style="font-size: 12px;">积极</div>
+                    </div>
+                    <div class="emotion-card emotion-negative">
+                        <div style="font-size: 24px; font-weight: 600;">${patient.emotion_counts.negative || 0}</div>
+                        <div style="font-size: 12px;">消极</div>
+                    </div>
+                    <div class="emotion-card emotion-neutral">
+                        <div style="font-size: 24px; font-weight: 600;">${patient.emotion_counts.neutral || 0}</div>
+                        <div style="font-size: 12px;">平静</div>
+                    </div>
+                </div>
+
+                <h4 style="margin-bottom: 12px;">最近对话记录</h4>
+                <div class="chat-history">
+                    ${chats.length === 0 ? '<div class="empty-state">暂无对话记录</div>' :
+                    chats.slice(0, 5).map(chat => `
+                        <div class="chat-item">
+                            <div class="chat-date">${chat.created_at}</div>
+                            <div class="chat-message">
+                                <strong>用户：</strong>${escapeHtml(chat.user_message)}
+                                ${chat.is_crisis_response ? '<span class="crisis-badge">危机干预</span>' : ''}
+                            </div>
+                        </div>
+                    `).join('')
+                    }
+                </div>
+
+                <div class="modal-actions">
+                    <button class="btn-secondary" onclick="closeModal()">关闭</button>
+                    <button class="btn-export" onclick="exportReport(${currentPatientId})">📄 导出完整报告</button>
+                </div>
+
+                <div class="notes-section">
+                    <h4 style="margin-bottom: 12px;">咨询师建议</h4>
+                    <div id="notesList">${notesHtml}</div>
+
+                    <div class="note-form">
+                        <select class="note-type-select" id="noteType">
+                            <option value="suggestion">💡 建议</option>
+                            <option value="observation">👀 观察</option>
+                            <option value="warning">⚠️ 警告</option>
+                            <option value="encouragement">💪 鼓励</option>
+                        </select>
+                        <textarea class="note-textarea" id="noteContent" placeholder="输入建议内容..."></textarea>
+                        <button class="btn-submit" onclick="addNote()">添加建议</button>
+                    </div>
+                </div>
+            `;
+
+            modal.classList.add('show');
+        }
+
+        async function addNote() {
+            const noteType = document.getElementById('noteType').value;
+            const noteContent = document.getElementById('noteContent').value.trim();
+
+            if (!noteContent) {
+                alert('请输入建议内容');
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/counselor/patient/${currentPatientId}/notes`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        note_type: noteType,
+                        note: noteContent
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    // 重新加载详情
+                    viewPatient(currentPatientId);
+                    // 清空输入框
+                    document.getElementById('noteContent').value = '';
+                } else {
+                    showError(data.error || '添加失败');
+                }
+            } catch (error) {
+                console.error('添加建议失败:', error);
+                showError('网络错误，请稍后重试');
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('patientModal').classList.remove('show');
+            currentPatientId = null;
+        }
+
+        // 点击模态框外部关闭
+        document.getElementById('patientModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeModal();
+            }
+        });
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function showError(message) {
+            alert(message);
+        }
+
+        async function exportReport(patientId) {
+            try {
+                // 显示导出中提示
+                const btn = event.target;
+                const originalText = btn.innerHTML;
+                btn.innerHTML = '导出中...';
+                btn.disabled = true;
+
+                // 导出报告
+                const response = await fetch(`/api/counselor/patient/${patientId}/export-report`);
+
+                if (response.ok) {
+                    // 下载文件
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = response.headers.get('Content-Disposition').match(/filename="(.+)"/)[1];
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+
+                    alert('报告导出成功！');
+                } else {
+                    const data = await response.json();
+                    showError(data.error || '导出失败');
+                }
+
+                // 恢复按钮
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+
+            } catch (error) {
+                console.error('导出报告失败:', error);
+                showError('导出失败，请稍后重试');
+
+                // 恢复按钮
+                const btn = event.target;
+                btn.innerHTML = '📄 导出完整报告';
+                btn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>

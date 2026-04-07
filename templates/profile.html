@@ -88,33 +88,6 @@
             background: #f8f9fa;
         }
 
-        .score {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 4px;
-            font-weight: 500;
-        }
-
-        .score-normal {
-            background: #d4edda;
-            color: #155724;
-        }
-
-        .score-mild {
-            background: #fff3cd;
-            color: #856404;
-        }
-
-        .score-moderate {
-            background: #ffe8d1;
-            color: #a0522d;
-        }
-
-        .score-severe {
-            background: #f8d7da;
-            color: #721c24;
-        }
-
         .empty-state {
             text-align: center;
             padding: 60px 20px;
@@ -143,11 +116,6 @@
             color: #666;
             margin-bottom: 20px;
             font-size: 14px;
-        }
-
-        .export-buttons {
-            display: flex;
-            gap: 15px;
         }
 
         .btn {
@@ -203,19 +171,18 @@
             </div>
             <ul class="nav-menu">
                 <li class="nav-item">
-                    <a href="/scales" class="nav-link">量表评估</a>
-                </li>
-                <li class="nav-item">
                     <a href="/chat" class="nav-link">AI对话</a>
                 </li>
+                {% if can_view_report %}
                 <li class="nav-item">
-                    <a href="/trend-analysis" class="nav-link">趋势分析</a>
+                    <a href="/report" class="nav-link">查看报告</a>
                 </li>
+                {% endif %}
                 <li class="nav-item active">
                     <a href="/profile" class="nav-link user-name">{{ current_user.username }}</a>
                 </li>
                 <li class="nav-item">
-                    <a href="/logout" class="nav-link nav-cta">退出</a>
+                    <a href="/api/auth/logout" class="nav-link nav-cta">退出</a>
                 </li>
             </ul>
         </div>
@@ -343,40 +310,12 @@
                 <div style="font-size: 24px; font-weight: 600;" id="username">{{ current_user.username }}</div>
             </div>
             <div style="background: white; padding: 24px; border-radius: 8px; border: 1px solid #e0e0e0;">
-                <div style="font-size: 14px; color: #666; margin-bottom: 8px;">量表评估次数</div>
-                <div style="font-size: 24px; font-weight: 600; color: #333;" id="scaleCount">-</div>
-            </div>
-            <div style="background: white; padding: 24px; border-radius: 8px; border: 1px solid #e0e0e0;">
                 <div style="font-size: 14px; color: #666; margin-bottom: 8px;">对话次数</div>
                 <div style="font-size: 24px; font-weight: 600; color: #333;" id="chatCount">-</div>
             </div>
             <div style="background: white; padding: 24px; border-radius: 8px; border: 1px solid #e0e0e0;">
                 <div style="font-size: 14px; color: #666; margin-bottom: 8px;">注册时间</div>
                 <div style="font-size: 16px; font-weight: 500; color: #333;" id="registerDate">-</div>
-            </div>
-        </div>
-
-        <!-- Scale Results Section -->
-        <div class="section">
-            <div class="section-header">
-                <h2 class="section-title">量表评估记录</h2>
-            </div>
-            <div class="table-container">
-                <table id="scaleTable">
-                    <thead>
-                        <tr>
-                            <th>评估时间</th>
-                            <th>量表类型</th>
-                            <th>得分</th>
-                            <th>严重程度</th>
-                        </tr>
-                    </thead>
-                    <tbody id="scaleTableBody">
-                        <tr>
-                            <td colspan="4" class="loading">加载中</td>
-                        </tr>
-                    </tbody>
-                </table>
             </div>
         </div>
 
@@ -406,7 +345,7 @@
         <!-- Export Section -->
         <div class="export-section">
             <h3>数据导出</h3>
-            <p>导出您的所有评估数据和对话记录，可用于个人保存或研究分析。</p>
+            <p>导出您的所有对话记录，可用于个人保存。</p>
             <div class="export-buttons">
                 <button class="btn btn-primary" onclick="exportData()">导出所有数据</button>
             </div>
@@ -416,7 +355,6 @@
     <script>
         document.addEventListener('DOMContentLoaded', async function() {
             await loadUserInfo();
-            await loadScaleHistory();
             await loadChatHistory();
         });
 
@@ -438,91 +376,6 @@
             }
         }
 
-        async function loadScaleHistory() {
-            const tbody = document.getElementById('scaleTableBody');
-            const countEl = document.getElementById('scaleCount');
-
-            try {
-                const response = await fetch('/api/user/scale-history');
-                if (!response.ok) throw new Error('获取量表历史失败');
-
-                const data = await response.json();
-
-                console.log('量表历史数据:', data); // 调试日志
-
-                // 更新评估次数 - API返回的是 data.data
-                if (data.success && data.data) {
-                    countEl.textContent = data.data.length;
-
-                    if (data.data.length === 0) {
-                        tbody.innerHTML = `
-                            <tr>
-                                <td colspan="4" class="empty-state">
-                                    <div class="empty-state-text">暂无量表评估记录</div>
-                                </td>
-                            </tr>
-                        `;
-                        return;
-                    }
-
-                    // 量表名称映射
-                    const scaleNames = {
-                        'phq9': 'PHQ-9 (抑郁)',
-                        'abc': 'ABC (自闭症行为)',
-                        'cars': 'CARS (儿童自闭症)',
-                        'hamd': 'HAMD (汉密尔顿抑郁)'
-                    };
-
-                    tbody.innerHTML = data.data.map(item => {
-                        const date = item.date; // API返回的是date字段
-
-                        // 从量表类型名称中提取scale_id
-                        let scaleId = 'phq9'; // 默认
-                        let scaleType = item.type;
-
-                        // 尝试匹配量表类型
-                        for (const [id, name] of Object.entries(scaleNames)) {
-                            if (item.type.includes(name.split(' ')[0])) {
-                                scaleId = id;
-                                break;
-                            }
-                        }
-
-                        const scoreClass = getScoreClass(item.score, scaleId);
-                        const severity = item.severity || '未知';
-
-                        return `
-                            <tr>
-                                <td>${date}</td>
-                                <td>${item.type}</td>
-                                <td><span class="score ${scoreClass}">${item.score}</span></td>
-                                <td>${severity}</td>
-                            </tr>
-                        `;
-                    }).join('');
-                } else {
-                    // API返回失败或无数据
-                    tbody.innerHTML = `
-                        <tr>
-                            <td colspan="4" class="empty-state">
-                                <div class="empty-state-text">${data.error || '暂无量表评估记录'}</div>
-                            </td>
-                        </tr>
-                    `;
-                }
-
-            } catch (error) {
-                console.error('加载量表历史失败:', error);
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="4" class="empty-state">
-                            <div class="empty-state-text">加载失败，请刷新页面重试</div>
-                        </td>
-                    </tr>
-                `;
-            }
-        }
-
         async function loadChatHistory() {
             const tbody = document.getElementById('chatTableBody');
             const countEl = document.getElementById('chatCount');
@@ -533,7 +386,7 @@
 
                 const data = await response.json();
 
-                console.log('对话历史数据:', data); // 调试日志
+                console.log('对话历史数据:', data);
 
                 // 更新对话次数
                 if (data.success && data.messages) {
@@ -597,55 +450,6 @@
             }
         }
 
-        function getScoreClass(score, scaleType) {
-            if (scaleType === 'phq9' || scaleType === 'hamd') {
-                if (score <= 4) return 'score-normal';
-                if (score <= 9) return 'score-mild';
-                if (score <= 14) return 'score-moderate';
-                if (score <= 19) return 'score-moderate';
-                return 'score-severe';
-            } else if (scaleType === 'abc' || scaleType === 'cars') {
-                // ABC和CARS分数越高越严重
-                if (score <= 15) return 'score-normal'; // CARS < 15 为正常
-                if (score <= 30) return 'score-mild';
-                if (score <= 37) return 'score-moderate';
-                return 'score-severe';
-            } else {
-                // 默认情况
-                if (score <= 4) return 'score-normal';
-                if (score <= 9) return 'score-mild';
-                if (score <= 14) return 'score-moderate';
-                return 'score-severe';
-            }
-        }
-
-        function getSeverityText(score, scaleType) {
-            if (scaleType === 'phq9' || scaleType === 'hamd') {
-                if (score <= 4) return '正常';
-                if (score <= 9) return '轻度';
-                if (score <= 14) return '中度';
-                if (score <= 19) return '中重度';
-                return '重度';
-            } else if (scaleType === 'cars') {
-                if (score <= 15) return '正常';
-                if (score <= 30) return '轻度-中度';
-                if (score <= 37) return '中度';
-                return '重度';
-            } else if (scaleType === 'abc') {
-                // ABC量表的分数解释会根据年龄段有所不同
-                if (score <= 47) return '正常';
-                if (score <= 64) return '轻度';
-                if (score <= 80) return '中度';
-                return '重度';
-            } else {
-                // 默认情况
-                if (score <= 4) return '正常';
-                if (score <= 9) return '轻度';
-                if (score <= 14) return '中度';
-                return '重度';
-            }
-        }
-
         async function exportData() {
             const btn = event.target;
             const originalText = btn.textContent;
@@ -667,24 +471,6 @@
                 alert('导出失败，请稍后重试');
                 btn.textContent = originalText;
                 btn.disabled = false;
-            }
-        }
-
-        async function logout() {
-            if (!confirm('确定要退出登录吗？')) return;
-
-            try {
-                const response = await fetch('/api/auth/logout', {
-                    method: 'POST'
-                });
-
-                if (response.ok) {
-                    window.location.href = '/';
-                } else {
-                    alert('退出登录失败');
-                }
-            } catch (error) {
-                console.error('退出登录错误:', error);
             }
         }
     </script>

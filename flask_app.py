@@ -228,7 +228,46 @@ def initialize_models():
 
 
 def analyze_sentiment(text):
-    """分析文本情绪"""
+    """分析文本情绪，优先检测危机关键词"""
+    # 危机关键词优先级检查（在ML模型之前）
+    crisis_keywords = {
+        'high': [
+            "自杀", "自尽", "轻生", "不想活了", "结束生命", "去死", "活够了",
+            "割腕", "跳楼", "吃药", "上吊", "了结", "解脱", "永别", "再见了"
+        ],
+        'medium': [
+            "伤害自己", "撑不下去", "太累了", "好痛苦", "受不了", "崩溃",
+            "绝望", "没希望", "没意义", "活着干嘛", "不如死了", "想消失"
+        ],
+        'low': [
+            "难过", "伤心", "委屈", "孤独", "无助", "迷茫", "焦虑", "害怕",
+            "烦躁", "沮丧", "失落", "疲惫", "空虚", "无力", "好累", "心累",
+            "想哭", "难受", "不舒服", "不对劲", "状态差", "心情不好", "痛苦"
+        ]
+    }
+
+    # 检查high级别关键词（最危险）
+    for keyword in crisis_keywords['high']:
+        if keyword in text:
+            print(f"[情绪分析] 检测到高危关键词 '{keyword}'，强制为负面情绪")
+            return {"emotion": "negative", "confidence": 1.0, "detected_by": "crisis_keyword_high"}
+
+    # 检查medium级别关键词
+    for keyword in crisis_keywords['medium']:
+        if keyword in text:
+            print(f"[情绪分析] 检测到中危关键词 '{keyword}'，强制为负面情绪")
+            return {"emotion": "negative", "confidence": 0.8, "detected_by": "crisis_keyword_medium"}
+
+    # 检查low级别关键词（轻微负面）
+    for keyword in crisis_keywords['low']:
+        if keyword in text:
+            print(f"[情绪分析] 检测到低危关键词 '{keyword}'，倾向负面情绪")
+            # 对于低危关键词，给ML模型一个参考，但不完全覆盖
+            # 如果ML模型返回neutral，我们覆盖为negative
+            if sentiment_pipeline is None:
+                return {"emotion": "negative", "confidence": 0.6, "detected_by": "crisis_keyword_low"}
+
+    # 使用ML模型分析（如果没有检测到高危/中危关键词）
     if sentiment_pipeline is None:
         return {"emotion": "neutral", "confidence": 0.0}
 
@@ -242,7 +281,14 @@ def analyze_sentiment(text):
         }
         emotion = label_map.get(top_result['label'], 'neutral')
         confidence = top_result['score']
-        return {"emotion": emotion, "confidence": confidence}
+
+        # 如果检测到低危关键词，且ML模型返回neutral，覆盖为negative
+        for keyword in crisis_keywords['low']:
+            if keyword in text and emotion == 'neutral':
+                print(f"[情绪分析] 低危关键词 '{keyword}' 覆盖ML的neutral判断")
+                return {"emotion": "negative", "confidence": 0.6, "detected_by": "crisis_keyword_low_override"}
+
+        return {"emotion": emotion, "confidence": confidence, "detected_by": "ml_model"}
     except Exception as e:
         print(f"情绪分析错误: {e}")
         return {"emotion": "neutral", "confidence": 0.0}
@@ -656,6 +702,96 @@ def get_user_info():
     return jsonify(current_user.to_dict())
 
 
+@app.route('/api/profile', methods=['GET'])
+@login_required
+def get_user_profile():
+    """获取用户画像（仅患者）"""
+    if current_user.is_counselor():
+        return jsonify({"error": "心理咨询师无此功能"}), 403
+
+    try:
+        from user_profile import UserProfile
+        user_profile = UserProfile.load_from_database(current_user)
+        return jsonify({
+            'success': True,
+            'profile': user_profile.to_dict(),
+            'summary': user_profile.get_summary()
+        })
+    except Exception as e:
+        print(f"获取用户画像错误: {e}")
+        return jsonify({"error": "获取用户画像失败"}), 500
+
+
+@app.route('/api/profile', methods=['PUT'])
+@login_required
+def update_user_profile():
+    """更新用户画像（仅患者）"""
+    if current_user.is_counselor():
+        return jsonify({"error": "心理咨询师无此功能"}), 403
+
+    try:
+        data = request.json
+        field = data.get('field')
+        value = data.get('value')
+
+        if not field:
+            return jsonify({"error": "缺少字段名"}), 400
+
+        # 验证字段
+        valid_fields = ['name', 'age', 'job', 'hobbies', 'concerns', 'preferences']
+        if field not in valid_fields:
+            return jsonify({"error": "无效的字段名"}), 400
+
+        # 更新字段
+        current_user.update_profile_field(field, value)
+        db.session.commit()
+
+        # 返回更新后的画像
+        from user_profile import UserProfile
+        user_profile = UserProfile.load_from_database(current_user)
+
+        return jsonify({
+            'success': True,
+            'message': f'已更新{field}',
+            'profile': user_profile.to_dict()
+        })
+    except Exception as e:
+        db.session.rollback()
+        print(f"更新用户画像错误: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": "更新用户画像失败"}), 500
+
+
+@app.route('/api/profile/reset', methods=['POST'])
+@login_required
+def reset_user_profile():
+    """清空用户画像（仅患者）"""
+    if current_user.is_counselor():
+        return jsonify({"error": "心理咨询师无此功能"}), 403
+
+    try:
+        # 清空画像字段
+        current_user.profile_name = None
+        current_user.profile_age = None
+        current_user.profile_job = None
+        current_user.profile_hobbies = None
+        current_user.profile_concerns = None
+        current_user.profile_preferences = None
+        current_user.profile_last_updated = None
+
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'message': '用户画像已清空'
+        })
+    except Exception as e:
+        db.session.rollback()
+        print(f"清空用户画像错误: {e}")
+        return jsonify({"error": "清空用户画像失败"}), 500
+
+
 # ==================== 患者相关 API ====================
 
 @app.route('/api/user/statistics')
@@ -739,6 +875,67 @@ def get_chat_messages():
         return jsonify({
             'success': False,
             'error': '获取聊天消息失败'
+        }), 500
+
+
+@app.route('/api/user/chat-messages/<int:message_id>', methods=['DELETE'])
+@login_required
+def delete_chat_message(message_id):
+    """删除单条聊天消息"""
+    try:
+        message = ChatMessage.query.filter_by(
+            id=message_id,
+            user_id=current_user.id
+        ).first()
+
+        if not message:
+            return jsonify({
+                'success': False,
+                'error': '消息不存在或无权删除'
+            }), 404
+
+        db.session.delete(message)
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'message': '删除成功'
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"删除消息错误: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': '删除消息失败'
+        }), 500
+
+
+@app.route('/api/user/chat-messages/clear', methods=['DELETE'])
+@login_required
+def clear_all_chat_messages():
+    """清空当前用户的所有聊天消息"""
+    try:
+        # 删除当前用户的所有聊天消息
+        ChatMessage.query.filter_by(user_id=current_user.id).delete()
+
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'message': '清空成功'
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"清空消息错误: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': '清空消息失败'
         }), 500
 
 
@@ -1129,6 +1326,18 @@ def chat():
         return jsonify({"error": "消息内容太短，请重新输入"}), 400
 
     try:
+        # ========== 用户画像处理 ==========
+        # 加载用户画像
+        from user_profile import UserProfile
+        user_profile = UserProfile.load_from_database(current_user)
+
+        # 从消息中提取新的画像信息（持续学习）
+        updated, updated_fields = user_profile.extract_from_message(message)
+        if updated:
+            print(f"[用户画像] 从消息中提取到新信息: {updated_fields}")
+            # 保存到数据库
+            user_profile.save_to_database()
+
         # 1. 分析文字情绪
         text_emotion = analyze_sentiment(message)
 
@@ -1175,40 +1384,58 @@ def chat():
 
                     # 生成危机干预回复
                     if crisis_responder:
-                        intervention = crisis_responder.generate(
-                            level=detection_result.level,
-                            keywords=detection_result.keywords,
-                            emotion=emotion_data.get("emotion"),
-                            user_input=message,
-                            user_context={"user_id": current_user.id}
-                        )
-                        crisis_response_data = intervention
-
-                        # 如果需要覆盖正常回复（2级及以上）
-                        if intervention.should_cover:
-                            print(f"[危机干预] 使用干预回复覆盖正常回复")
-                            response = intervention.content
-
-                            # 保存聊天记录
-                            chat_message = ChatMessage(
-                                user_id=current_user.id,
-                                user_message=message,
-                                bot_response=response,
-                                emotion=emotion_data["emotion"],
-                                confidence=emotion_data["confidence"],
-                                is_crisis_response=True
+                        try:
+                            intervention = crisis_responder.generate(
+                                level=detection_result.level,
+                                keywords=detection_result.keywords,
+                                emotion=emotion_data.get("emotion"),
+                                user_input=message,
+                                user_context={"user_id": current_user.id}
                             )
-                            db.session.add(chat_message)
-                            db.session.commit()
 
-                            return jsonify({
-                                "response": response,
-                                "emotion": emotion_data,
-                                "audio_path": None,
-                                "crisis_detected": True,
-                                "crisis_level": crisis_level,
-                                "crisis_intervention": True
-                            })
+                            print(f"[危机干预] 生成成功: should_cover={intervention.should_cover}, is_ai_generated={intervention.is_ai_generated}")
+                            print(f"[危机干预] 回复内容: {intervention.content[:100] if intervention.content else 'None'}...")
+
+                            crisis_response_data = intervention
+
+                            # 如果需要覆盖正常回复（2级及以上）
+                            if intervention.should_cover:
+                                print(f"[危机干预] 使用干预回复覆盖正常回复")
+                                response = intervention.content
+
+                                # 验证response
+                                if not response or len(response) < 10:
+                                    print(f"[危机干预] 警告：回复异常，使用备用模板")
+                                    response = "我很关心你的状态。请考虑联系专业帮助。"
+
+                                # 保存聊天记录
+                                chat_message = ChatMessage(
+                                    user_id=current_user.id,
+                                    user_message=message,
+                                    bot_response=response,
+                                    emotion=emotion_data["emotion"],
+                                    confidence=emotion_data["confidence"],
+                                    is_crisis_response=True
+                                )
+                                db.session.add(chat_message)
+                                db.session.commit()
+
+                                print(f"[危机干预] 即将return，不再执行正常对话")
+                                return jsonify({
+                                    "success": True,  # ← 添加success字段，前端依赖此字段判断
+                                    "response": response,
+                                    "emotion": emotion_data,
+                                    "audio_path": None,
+                                    "crisis_detected": True,
+                                    "crisis_level": crisis_level,
+                                    "crisis_intervention": True
+                                })
+                            else:
+                                print(f"[危机干预] should_cover=False，继续正常对话")
+                        except Exception as e:
+                            print(f"[危机干预] 生成失败: {e}")
+                            import traceback
+                            traceback.print_exc()
 
             except Exception as e:
                 print(f"危机检测失败: {e}")
@@ -1218,8 +1445,8 @@ def chat():
         # 3. 生成系统提示词
         conversation_id = f"user_{current_user.id}"  # 每个用户一个会话
 
-        # 使用固定的系统提示词
-        system_prompt = PromptConfig.FIXED_SYSTEM_PROMPT
+        # 使用用户画像生成自适应系统提示词
+        system_prompt = user_profile.get_adaptive_system_prompt(PromptConfig.FIXED_SYSTEM_PROMPT)
 
         # 生成回复
         result = mindchat_system.analyze_and_respond(message, system_prompt=system_prompt, user_id=current_user.id)
@@ -1583,7 +1810,6 @@ def calculate_user_status(patient):
 
     # 检查是否有近期危机事件
     try:
-        crisis_storage = crisis_detector.storage if crisis_detector else None
         if crisis_storage:
             recent_crisis = crisis_storage.get_unhandled_events(user_id=patient.id)
             if recent_crisis:
@@ -1653,8 +1879,8 @@ def get_dashboard_stats():
         # 危机预警用户
         crisis_count = 0
         try:
-            if crisis_detector and crisis_detector.storage:
-                crisis_events = crisis_detector.storage.get_unhandled_events()
+            if crisis_storage:
+                crisis_events = crisis_storage.get_unhandled_events()
                 # 获取唯一用户数
                 crisis_users = set(event.user_id for event in crisis_events)
                 crisis_count = len(crisis_users)

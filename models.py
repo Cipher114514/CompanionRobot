@@ -26,6 +26,15 @@ class User(UserMixin, db.Model):
     # 出生日期 (仅对患者)
     birth_date = db.Column(db.Date, nullable=True)
 
+    # 用户画像字段 (JSON格式存储)
+    profile_name = db.Column(db.String(50))  # 用户昵称/名字
+    profile_age = db.Column(db.Integer)  # 用户画像中的年龄（可能与实际年龄不同）
+    profile_job = db.Column(db.String(100))  # 职业
+    profile_hobbies = db.Column(db.Text)  # 爱好列表（JSON格式）
+    profile_concerns = db.Column(db.Text)  # 困扰/问题列表（JSON格式）
+    profile_preferences = db.Column(db.Text)  # 对话偏好（JSON格式）
+    profile_last_updated = db.Column(db.DateTime)  # 画像最后更新时间
+
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     last_login = db.Column(db.DateTime)
 
@@ -44,6 +53,68 @@ class User(UserMixin, db.Model):
     def is_counselor(self):
         """是否是心理咨询师"""
         return self.role == 'counselor'
+
+    def get_profile_data(self):
+        """获取用户画像数据（支持置信度和元数据）"""
+        import json
+
+        # 解析preferences字段（可能包含confidence和metadata）
+        preferences_data = {}
+        confidence_data = {
+            'name': 0.0,
+            'age': 0.0,
+            'job': 0.0,
+            'hobbies': {},
+            'concerns': {}
+        }
+        metadata_data = {
+            'total_messages_analyzed': 0,
+            'extraction_sources': []
+        }
+
+        if self.profile_preferences:
+            try:
+                parsed = json.loads(self.profile_preferences)
+                # 兼容旧格式（直接是preferences）和新格式（包含confidence和metadata）
+                if isinstance(parsed, dict) and 'preferences' in parsed:
+                    preferences_data = parsed['preferences']
+                    confidence_data = parsed.get('confidence', confidence_data)
+                    metadata_data = parsed.get('metadata', metadata_data)
+                else:
+                    preferences_data = parsed
+            except:
+                preferences_data = {}
+
+        return {
+            'name': self.profile_name,
+            'age': self.profile_age,
+            'job': self.profile_job,
+            'hobbies': json.loads(self.profile_hobbies) if self.profile_hobbies else [],
+            'concerns': json.loads(self.profile_concerns) if self.profile_concerns else [],
+            'preferences': preferences_data,
+            'confidence': confidence_data,
+            'metadata': metadata_data,
+            'last_updated': self.profile_last_updated.isoformat() if self.profile_last_updated else None
+        }
+
+    def update_profile_field(self, field, value):
+        """更新单个画像字段"""
+        import json
+        if field in ['name', 'age', 'job']:
+            setattr(self, f'profile_{field}', value)
+        elif field in ['hobbies', 'concerns']:
+            current = getattr(self, f'profile_{field}')
+            current_list = json.loads(current) if current else []
+            if value not in current_list:
+                current_list.append(value)
+            setattr(self, f'profile_{field}', json.dumps(current_list, ensure_ascii=False))
+        elif field == 'preferences':
+            current = self.profile_preferences
+            current_prefs = json.loads(current) if current else {}
+            current_prefs.update(value)
+            self.profile_preferences = json.dumps(current_prefs, ensure_ascii=False)
+
+        self.profile_last_updated = datetime.utcnow()
 
     def __repr__(self):
         return f'<User {self.username} ({self.role})>'

@@ -16,7 +16,7 @@ class CrisisConfig:
     # 检测开关
     ENABLE_TEXT_DETECTION: bool = True
     ENABLE_VOICE_DETECTION: bool = True
-    ENABLE_SCALE_DETECTION: bool = True
+    ENABLE_SCALE_DETECTION: bool = False  # 量表功能已移除
     
     # 分级阈值（置信度）
     # 注意：单个关键词的得分：low=0.15, medium=0.25, high=0.4
@@ -24,11 +24,12 @@ class CrisisConfig:
     LEVEL_1_THRESHOLD: float = 0.1   # 降低阈值，确保单个低危关键词(0.15)也能触发
     LEVEL_2_THRESHOLD: float = 0.2   # 降低阈值，确保单个中危关键词(0.25)也能触发
     LEVEL_3_THRESHOLD: float = 0.35  # 降低阈值，确保单个高危关键词(0.4)也能触发
-    
-    # 量表预警分数（PHQ-9 总分 0-27）
-    PHQ9_WARNING_SCORE: int = 10
-    PHQ9_CRITICAL_SCORE: int = 20
-    
+
+    # 语音情绪检测配置
+    VOICE_NEGATIVE_EMOTIONS: list = field(default_factory=lambda: ["sad", "angry", "anxious", "fear", "depressed"])
+    VOICE_NEGATIVE_SCORE: float = 0.3
+    VOICE_NEUTRAL_SCORE: float = 0.0
+
     # AI 生成配置
     USE_AI_GENERATION: bool = True
     AI_GENERATOR_TIMEOUT: int = 5
@@ -79,15 +80,7 @@ class CrisisConfig:
         if self.LEVEL_2_THRESHOLD > self.LEVEL_3_THRESHOLD:
             logger.error("LEVEL_2_THRESHOLD 不应大于 LEVEL_3_THRESHOLD")
             return False
-        
-        # 检查 PHQ-9 分数范围（0-27）
-        if not (0 <= self.PHQ9_WARNING_SCORE <= 27):
-            logger.error(f"PHQ9_WARNING_SCORE 超出范围 [0, 27]：{self.PHQ9_WARNING_SCORE}")
-            return False
-        if not (0 <= self.PHQ9_CRITICAL_SCORE <= 27):
-            logger.error(f"PHQ9_CRITICAL_SCORE 超出范围 [0, 27]：{self.PHQ9_CRITICAL_SCORE}")
-            return False
-        
+
         # 检查数据文件
         if self.KEYWORDS_FILE and not self.KEYWORDS_FILE.exists():
             logger.warning(f"关键词文件不存在：{self.KEYWORDS_FILE}")
@@ -104,7 +97,7 @@ class CrisisConfig:
         # 从环境变量覆盖布尔值
         config.ENABLE_TEXT_DETECTION = os.getenv("CRISIS_ENABLE_TEXT", "true").lower() == "true"
         config.ENABLE_VOICE_DETECTION = os.getenv("CRISIS_ENABLE_VOICE", "true").lower() == "true"
-        config.ENABLE_SCALE_DETECTION = os.getenv("CRISIS_ENABLE_SCALE", "true").lower() == "true"
+        config.ENABLE_SCALE_DETECTION = False  # 量表功能已移除，不再支持环境变量配置
         config.USE_AI_GENERATION = os.getenv("CRISIS_USE_AI", "true").lower() == "true"
         config.ENABLE_RESOURCES = os.getenv("CRISIS_ENABLE_RESOURCES", "false").lower() == "true"
         
@@ -112,11 +105,7 @@ class CrisisConfig:
         config.LEVEL_1_THRESHOLD = float(os.getenv("CRISIS_LEVEL1", str(config.LEVEL_1_THRESHOLD)))
         config.LEVEL_2_THRESHOLD = float(os.getenv("CRISIS_LEVEL2", str(config.LEVEL_2_THRESHOLD)))
         config.LEVEL_3_THRESHOLD = float(os.getenv("CRISIS_LEVEL3", str(config.LEVEL_3_THRESHOLD)))
-        
-        # 从环境变量覆盖量表分数
-        config.PHQ9_WARNING_SCORE = int(os.getenv("CRISIS_PHQ9_WARNING", "10"))
-        config.PHQ9_CRITICAL_SCORE = int(os.getenv("CRISIS_PHQ9_CRITICAL", "20"))
-        
+
         # 从环境变量覆盖超时
         config.AI_GENERATOR_TIMEOUT = int(os.getenv("CRISIS_AI_TIMEOUT", "5"))
         

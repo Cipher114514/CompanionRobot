@@ -427,11 +427,30 @@ async function displayHistory() {
 }
 
 // 清空历史记录
-function clearHistory() {
-    if (confirm('确定要清空所有历史对话记录吗？此操作不可恢复。')) {
-        conversationHistory = [];
-        saveHistory();
-        displayHistory();
+async function clearHistory() {
+    if (!confirm('确定要清空所有历史对话记录吗？此操作不可恢复。')) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/user/chat-messages/clear', {
+            method: 'DELETE'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            console.log('[OK] 已清空所有历史记录');
+            // 清空本地缓存
+            conversationHistory = [];
+            saveHistory();
+            displayHistory();
+        } else {
+            alert('清空失败：' + (result.error || '未知错误'));
+        }
+    } catch (error) {
+        console.error('清空历史记录失败:', error);
+        alert('清空失败，请稍后重试');
     }
 }
 

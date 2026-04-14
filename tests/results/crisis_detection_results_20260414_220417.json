@@ -1,0 +1,356 @@
+[
+  {
+    "test_name": "测试1: 高危关键词-自杀",
+    "user_input": "我真的想自杀，不想活了",
+    "passed": true,
+    "failures": [],
+    "result": {
+      "is_crisis": true,
+      "level": 3,
+      "confidence": 0.8,
+      "keywords": [
+        "自杀",
+        "不想活了"
+      ],
+      "sources": {
+        "text": true,
+        "voice": false,
+        "scale": false
+      },
+      "suggested_action": "强烈建议立即联系专业机构"
+    },
+    "expected": {
+      "is_crisis": true,
+      "level": 3,
+      "keywords": [
+        "自杀"
+      ]
+    }
+  },
+  {
+    "test_name": "测试2: 高危关键词-结束生命",
+    "user_input": "我想结束生命，太痛苦了",
+    "passed": true,
+    "failures": [],
+    "result": {
+      "is_crisis": true,
+      "level": 3,
+      "confidence": 0.55,
+      "keywords": [
+        "结束生命",
+        "痛苦"
+      ],
+      "sources": {
+        "text": true,
+        "voice": false,
+        "scale": false
+      },
+      "suggested_action": "强烈建议立即联系专业机构"
+    },
+    "expected": {
+      "is_crisis": true,
+      "level": 3,
+      "keywords": [
+        "结束生命"
+      ]
+    }
+  },
+  {
+    "test_name": "测试3: 高危关键词-轻生",
+    "user_input": "最近有轻生的念头",
+    "passed": true,
+    "failures": [],
+    "result": {
+      "is_crisis": true,
+      "level": 3,
+      "confidence": 0.4,
+      "keywords": [
+        "轻生"
+      ],
+      "sources": {
+        "text": true,
+        "voice": false,
+        "scale": false
+      },
+      "suggested_action": "强烈建议立即联系专业机构"
+    },
+    "expected": {
+      "is_crisis": true,
+      "level": 3,
+      "keywords": [
+        "轻生"
+      ]
+    }
+  },
+  {
+    "test_name": "测试4: 中危关键词-伤害自己",
+    "user_input": "我有时候想伤害自己",
+    "passed": true,
+    "failures": [],
+    "result": {
+      "is_crisis": true,
+      "level": 2,
+      "confidence": 0.25,
+      "keywords": [
+        "伤害自己"
+      ],
+      "sources": {
+        "text": true,
+        "voice": false,
+        "scale": false
+      },
+      "suggested_action": "建议专业心理咨询"
+    },
+    "expected": {
+      "is_crisis": true,
+      "level": 2,
+      "keywords": [
+        "伤害自己"
+      ]
+    }
+  },
+  {
+    "test_name": "测试5: 中危关键词-撑不下去",
+    "user_input": "我真的撑不下去了，太累了",
+    "passed": false,
+    "failures": [
+      "危机等级错误: 期望=2, 实际=3"
+    ],
+    "result": {
+      "is_crisis": true,
+      "level": 3,
+      "confidence": 0.5,
+      "keywords": [
+        "撑不下去",
+        "太累了"
+      ],
+      "sources": {
+        "text": true,
+        "voice": false,
+        "scale": false
+      },
+      "suggested_action": "强烈建议立即联系专业机构"
+    },
+    "expected": {
+      "is_crisis": true,
+      "level": 2,
+      "keywords": [
+        "撑不下去"
+      ]
+    }
+  },
+  {
+    "test_name": "测试6: 低危关键词-难过",
+    "user_input": "我今天很难过",
+    "passed": true,
+    "failures": [],
+    "result": {
+      "is_crisis": true,
+      "level": 1,
+      "confidence": 0.15,
+      "keywords": [
+        "难过"
+      ],
+      "sources": {
+        "text": true,
+        "voice": false,
+        "scale": false
+      },
+      "suggested_action": "温暖关怀，推荐疗愈内容"
+    },
+    "expected": {
+      "is_crisis": true,
+      "level": 1,
+      "keywords": [
+        "难过"
+      ]
+    }
+  },
+  {
+    "test_name": "测试7: 低危关键词-痛苦",
+    "user_input": "感到很痛苦，不知道怎么办",
+    "passed": true,
+    "failures": [],
+    "result": {
+      "is_crisis": true,
+      "level": 1,
+      "confidence": 0.15,
+      "keywords": [
+        "痛苦"
+      ],
+      "sources": {
+        "text": true,
+        "voice": false,
+        "scale": false
+      },
+      "suggested_action": "温暖关怀，推荐疗愈内容"
+    },
+    "expected": {
+      "is_crisis": true,
+      "level": 1,
+      "keywords": [
+        "痛苦"
+      ]
+    }
+  },
+  {
+    "test_name": "测试8: 多关键词组合-高危+中危",
+    "user_input": "我想自杀，有时候还会伤害自己",
+    "passed": true,
+    "failures": [],
+    "result": {
+      "is_crisis": true,
+      "level": 3,
+      "confidence": 0.65,
+      "keywords": [
+        "自杀",
+        "伤害自己"
+      ],
+      "sources": {
+        "text": true,
+        "voice": false,
+        "scale": false
+      },
+      "suggested_action": "强烈建议立即联系专业机构"
+    },
+    "expected": {
+      "is_crisis": true,
+      "level": 3,
+      "keywords": [
+        "自杀",
+        "伤害自己"
+      ]
+    }
+  },
+  {
+    "test_name": "测试9: 多关键词组合-中危+低危",
+    "user_input": "太累了撑不下去，真的好痛苦",
+    "passed": false,
+    "failures": [
+      "危机等级错误: 期望=2, 实际=3"
+    ],
+    "result": {
+      "is_crisis": true,
+      "level": 3,
+      "confidence": 0.9,
+      "keywords": [
+        "撑不下去",
+        "太累了",
+        "好痛苦",
+        "痛苦"
+      ],
+      "sources": {
+        "text": true,
+        "voice": false,
+        "scale": false
+      },
+      "suggested_action": "强烈建议立即联系专业机构"
+    },
+    "expected": {
+      "is_crisis": true,
+      "level": 2,
+      "keywords": [
+        "撑不下去",
+        "痛苦"
+      ]
+    }
+  },
+  {
+    "test_name": "测试10: 正常负面情绪-不触发危机",
+    "user_input": "今天工作有点累，心情不太好",
+    "passed": true,
+    "failures": [],
+    "result": {
+      "is_crisis": false,
+      "level": 0,
+      "confidence": 0.0,
+      "keywords": [],
+      "sources": {
+        "text": false,
+        "voice": false,
+        "scale": false
+      },
+      "suggested_action": "继续陪伴观察"
+    },
+    "expected": {
+      "is_crisis": false,
+      "level": 0,
+      "keywords": []
+    }
+  },
+  {
+    "test_name": "测试11: 正常对话-积极情绪",
+    "user_input": "今天天气真好，心情不错",
+    "passed": true,
+    "failures": [],
+    "result": {
+      "is_crisis": false,
+      "level": 0,
+      "confidence": 0.0,
+      "keywords": [],
+      "sources": {
+        "text": false,
+        "voice": false,
+        "scale": false
+      },
+      "suggested_action": "继续陪伴观察"
+    },
+    "expected": {
+      "is_crisis": false,
+      "level": 0,
+      "keywords": []
+    }
+  },
+  {
+    "test_name": "测试12: 空输入",
+    "user_input": "",
+    "passed": true,
+    "failures": [],
+    "result": {
+      "is_crisis": false,
+      "level": 0,
+      "confidence": 0.0,
+      "keywords": [],
+      "sources": {
+        "text": false,
+        "voice": false,
+        "scale": false
+      },
+      "suggested_action": "继续陪伴观察"
+    },
+    "expected": {
+      "is_crisis": false,
+      "level": 0,
+      "keywords": []
+    }
+  },
+  {
+    "test_name": "测试13: 隐晦表达-需要情绪分析辅助",
+    "user_input": "我觉得活着没有意义，一切都很黑暗",
+    "passed": false,
+    "failures": [
+      "危机判定错误: 期望=True, 实际=False",
+      "危机等级错误: 期望=2, 实际=0",
+      "关键词检测错误:\n  期望关键词: {'没意义'}\n  实际关键词: set()\n  缺失: {'没意义'}\n  额外检测到: set() (这是好事)"
+    ],
+    "result": {
+      "is_crisis": false,
+      "level": 0,
+      "confidence": 0.0,
+      "keywords": [],
+      "sources": {
+        "text": false,
+        "voice": false,
+        "scale": false
+      },
+      "suggested_action": "继续陪伴观察"
+    },
+    "expected": {
+      "is_crisis": true,
+      "level": 2,
+      "keywords": [
+        "没意义"
+      ]
+    }
+  }
+]

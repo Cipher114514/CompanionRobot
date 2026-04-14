@@ -319,6 +319,20 @@
             </div>
         </div>
 
+        <!-- 用户画像卡片 -->
+        <div class="section" style="background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); padding: 30px; border-radius: 8px; margin-bottom: 40px;">
+            <div class="section-header" style="border-bottom-color: rgba(0,0,0,0.1);">
+                <h2 class="section-title">🎭 我的画像</h2>
+                <div>
+                    <button class="btn" onclick="editProfile()" style="margin-right: 10px;">编辑</button>
+                    <button class="btn" onclick="resetProfile()" style="background: #fff; color: #dc3545; border-color: #dc3545;">重置</button>
+                </div>
+            </div>
+            <div id="profileContent">
+                <div class="loading">加载中</div>
+            </div>
+        </div>
+
         <!-- Chat History Section -->
         <div class="section">
             <div class="section-header">
@@ -355,6 +369,7 @@
     <script>
         document.addEventListener('DOMContentLoaded', async function() {
             await loadUserInfo();
+            await loadUserProfile();
             await loadChatHistory();
         });
 
@@ -373,6 +388,212 @@
                 }
             } catch (error) {
                 console.error('加载用户信息失败:', error);
+            }
+        }
+
+        async function loadUserProfile() {
+            const contentEl = document.getElementById('profileContent');
+
+            try {
+                const response = await fetch('/api/profile');
+                if (!response.ok) throw new Error('获取用户画像失败');
+
+                const data = await response.json();
+
+                if (data.success && data.profile) {
+                    const profile = data.profile;
+
+                    // 构建画像展示
+                    let html = '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">';
+
+                    // 基本信息
+                    if (profile.name) {
+                        html += `
+                            <div style="background: rgba(255,255,255,0.9); padding: 15px; border-radius: 6px;">
+                                <div style="font-size: 12px; color: #666; margin-bottom: 5px;">👤 名字</div>
+                                <div style="font-size: 16px; font-weight: 500; color: #333;">${profile.name}</div>
+                            </div>
+                        `;
+                    }
+
+                    if (profile.age) {
+                        html += `
+                            <div style="background: rgba(255,255,255,0.9); padding: 15px; border-radius: 6px;">
+                                <div style="font-size: 12px; color: #666; margin-bottom: 5px;">🎂 年龄</div>
+                                <div style="font-size: 16px; font-weight: 500; color: #333;">${profile.age}岁</div>
+                            </div>
+                        `;
+                    }
+
+                    if (profile.job) {
+                        html += `
+                            <div style="background: rgba(255,255,255,0.9); padding: 15px; border-radius: 6px;">
+                                <div style="font-size: 12px; color: #666; margin-bottom: 5px;">💼 职业</div>
+                                <div style="font-size: 16px; font-weight: 500; color: #333;">${profile.job}</div>
+                            </div>
+                        `;
+                    }
+
+                    html += '</div>';
+
+                    // 爱好
+                    if (profile.hobbies && profile.hobbies.length > 0) {
+                        html += `
+                            <div style="margin-top: 15px; background: rgba(255,255,255,0.9); padding: 15px; border-radius: 6px;">
+                                <div style="font-size: 12px; color: #666; margin-bottom: 8px;">❤️ 爱好</div>
+                                <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                                    ${profile.hobbies.map(hobby => `
+                                        <span style="background: #e3f2fd; color: #1976d2; padding: 4px 12px; border-radius: 12px; font-size: 13px;">${hobby}</span>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        `;
+                    }
+
+                    // 困扰
+                    if (profile.concerns && profile.concerns.length > 0) {
+                        html += `
+                            <div style="margin-top: 15px; background: rgba(255,255,255,0.9); padding: 15px; border-radius: 6px;">
+                                <div style="font-size: 12px; color: #666; margin-bottom: 8px;">🤔 关注事项</div>
+                                <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                                    ${profile.concerns.map(concern => `
+                                        <span style="background: #fff3e0; color: #f57c00; padding: 4px 12px; border-radius: 12px; font-size: 13px;">${concern}</span>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        `;
+                    }
+
+                    // 更新时间
+                    if (profile.last_updated) {
+                        const updateDate = new Date(profile.last_updated);
+                        html += `
+                            <div style="margin-top: 15px; text-align: right;">
+                                <span style="font-size: 12px; color: #666;">更新时间: ${updateDate.toLocaleString('zh-CN')}</span>
+                            </div>
+                        `;
+                    }
+
+                    // 如果画像为空
+                    if (!profile.name && !profile.age && !profile.job &&
+                        (!profile.hobbies || profile.hobbies.length === 0) &&
+                        (!profile.concerns || profile.concerns.length === 0)) {
+                        html = `
+                            <div style="text-align: center; padding: 30px; color: #666;">
+                                <div style="font-size: 48px; margin-bottom: 15px;">🎭</div>
+                                <div style="font-size: 16px; margin-bottom: 8px;">画像为空</div>
+                                <div style="font-size: 14px; color: #999;">AI会在对话中自动学习你的信息</div>
+                            </div>
+                        `;
+                    }
+
+                    contentEl.innerHTML = html;
+                } else {
+                    contentEl.innerHTML = `
+                        <div style="text-align: center; padding: 30px; color: #999;">
+                            <div>加载失败，请刷新页面重试</div>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                console.error('加载用户画像失败:', error);
+                contentEl.innerHTML = `
+                    <div style="text-align: center; padding: 30px; color: #999;">
+                        <div>加载失败，请刷新页面重试</div>
+                    </div>
+                `;
+            }
+        }
+
+        function editProfile() {
+            // 简单的编辑功能 - 使用prompt
+            const field = prompt('请选择要编辑的字段:\n1 - 名字\n2 - 年龄\n3 - 职业\n4 - 爱好\n5 - 困扰\n\n请输入数字(1-5):');
+
+            const fieldMap = {
+                '1': 'name',
+                '2': 'age',
+                '3': 'job',
+                '4': 'hobbies',
+                '5': 'concerns'
+            };
+
+            if (!field || !fieldMap[field]) {
+                alert('无效的选择');
+                return;
+            }
+
+            const fieldName = fieldMap[field];
+            let value;
+
+            if (fieldName === 'age') {
+                value = prompt('请输入年龄:');
+                value = parseInt(value);
+                if (isNaN(value)) {
+                    alert('年龄必须是数字');
+                    return;
+                }
+            } else if (fieldName === 'hobbies' || fieldName === 'concerns') {
+                value = prompt(`请输入${fieldName === 'hobbies' ? '爱好' : '困扰'}(用逗号分隔):`);
+                if (value) {
+                    value = value.split(',').map(v => v.trim()).filter(v => v);
+                }
+            } else {
+                value = prompt(`请输入${fieldName === 'name' ? '名字' : '职业'}:`);
+            }
+
+            if (!value) {
+                return;
+            }
+
+            // 发送更新请求
+            updateProfileField(fieldName, value);
+        }
+
+        async function updateProfileField(field, value) {
+            try {
+                const response = await fetch('/api/profile', {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ field, value })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    alert(data.message || '更新成功');
+                    await loadUserProfile();
+                } else {
+                    alert(data.error || '更新失败');
+                }
+            } catch (error) {
+                console.error('更新画像失败:', error);
+                alert('更新失败，请稍后重试');
+            }
+        }
+
+        async function resetProfile() {
+            if (!confirm('确定要清空用户画像吗？此操作不可恢复。')) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/profile/reset', {
+                    method: 'POST'
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    alert('画像已清空');
+                    await loadUserProfile();
+                } else {
+                    alert(data.error || '重置失败');
+                }
+            } catch (error) {
+                console.error('重置画像失败:', error);
+                alert('重置失败，请稍后重试');
             }
         }
 

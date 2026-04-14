@@ -1,39 +1,24 @@
-# 元气充能陪伴平台 - 依赖包
+# 元气充能陪伴平台 - 精简依赖（移除未使用的包）
 
-# Flask Web 框架
-Flask>=3.0.0
-Flask-Login>=0.6.3
-Flask-SQLAlchemy>=3.1.1
-Werkzeug>=3.0.0
+# ============ Flask Web 框架 ============
+Flask==3.0.0
+Flask-Login==0.6.3
+Flask-SQLAlchemy==3.1.1
+Werkzeug==3.0.0
 
-# 核心依赖
-streamlit>=1.28.0
-gradio>=4.0.0  # Gradio 聊天界面（推荐）
-transformers>=4.30.0
-torch>=2.0.0
-safetensors>=0.3.0
+# ============ 核心依赖 ============
+transformers==4.37.2
+torch==2.2.1
+safetensors==0.4.2
 
-# 数据处理和可视化
-pandas>=2.0.0
-plotly>=5.14.0
-numpy>=1.24.0
-# scipy>=1.11.0  # 可选：音频生成（内置wave库可替代）
+# ============ 模型支持 ============
+accelerate==0.25.0
+bitsandbytes==0.41.0
+huggingface-hub==0.20.0
 
-# MindChat 对话模型相关
-accelerate>=0.20.0
-bitsandbytes>=0.41.0  # 4-bit 量化支持（可选，推荐用于节省显存）
+# ============ 语音处理 ============
+openai-whisper==20231117
+edge-tts==6.1.9
 
-# 模型下载
-huggingface-hub>=0.17.0
-
-# 语音识别
-openai-whisper>=20231117  # Whisper 语音识别
-
-# 语音合成
-edge-tts>=6.1.0  # 微软 Edge TTS
-
-# CASIA 多模态情绪分析
-einops>=0.6.0  # CASIA 模型依赖
-
-# AI音乐生成（可选）
-audiocraft>=1.0.0  # Meta的MusicGen音乐生成模型（需要GPU推荐，CPU也可用）
+# ============ 数据处理 ============
+numpy==1.24.0

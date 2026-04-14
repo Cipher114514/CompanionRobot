@@ -28,21 +28,6 @@ class EmotionBridge:
             return None
 
 
-class ScaleBridge:
-    """量表模块桥接"""
-
-    @staticmethod
-    def get_latest_scores(user_id: int) -> Optional[dict]:
-        """
-        获取用户最新量表分数
-
-        注意：量表功能已移除，返回None
-        """
-        # 量表功能已移除，返回None
-        logger.warning("量表功能已移除")
-        return None
-
-
 class VoiceBridge:
     """语音模块桥接"""
     

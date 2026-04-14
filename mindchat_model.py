@@ -81,22 +81,14 @@ class MindChatDialogue:
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})
             else:
-                # 默认的陪伴角色 - 极简短对话
+                # 默认的陪伴角色 - 心理咨询师模式
                 messages.append({
                     "role": "system",
-                    "content": """你是陪伴助手。
-
-规则:
-1. 只说一句话，10-20字
+                    "content": """你是温暖的心理陪伴者。回复要求：
+1. 必须2-3句话，50字以内
 2. 不要"听起来""听上去"开头
-3. 直接说话：你好小明、工作辛苦了、注意休息
-4. 不要说教，不要列建议
-
-示例:
-- 你好小明，工作辛苦了
-- 早点睡，身体重要
-- 加油，会好起来的
-- 好的，试试看"""
+3. 不要列1.2.3.建议
+4. 直接表达理解和关心"""
                 })
 
             # 添加当前用户消息（不使用历史）
@@ -112,9 +104,9 @@ class MindChatDialogue:
             # 编码
             inputs = self.tokenizer(text, return_tensors="pt").to(self.device)
 
-            # 限制输出长度：40字左右的对话约60-80 tokens
-            # 留出余量避免截断
-            actual_max_new_tokens = 90
+            # 限制输出长度：避免截断，让模型完整输出
+            # 512 tokens 确保回复完整，模型会在适当时候自然停止
+            actual_max_new_tokens = 512
 
             # 生成参数 - 极简快速
             with torch.no_grad():

@@ -3,7 +3,7 @@
 from .detector import CrisisDetector, CrisisDetectionResult
 from .responder import CrisisResponder, InterventionResponse
 from .storage import CrisisStorage
-from .bridges import EmotionBridge, ScaleBridge, VoiceBridge
+from .bridges import EmotionBridge, VoiceBridge
 from .config import CrisisConfig
 
 __all__ = [
@@ -13,7 +13,6 @@ __all__ = [
     "InterventionResponse",
     "CrisisStorage",
     "EmotionBridge",
-    "ScaleBridge",
     "VoiceBridge",
     "CrisisConfig",
 ]

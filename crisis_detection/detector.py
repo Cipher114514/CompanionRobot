@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from .config import CrisisConfig
-from .bridges import EmotionBridge, ScaleBridge, VoiceBridge
+from .bridges import EmotionBridge, VoiceBridge
 
 
 @dataclass
@@ -29,7 +29,6 @@ class CrisisDetector:
         self.keywords_data = self._load_keywords()
         # 桥接模块可选初始化（避免模块不存在时报错）
         self.emotion_bridge = EmotionBridge()
-        self.scale_bridge = ScaleBridge()
         self.voice_bridge = VoiceBridge()
     
     def _load_keywords(self) -> dict:
@@ -70,15 +69,10 @@ class CrisisDetector:
             voice_score = self._detect_voice(voice_emotion)
             result.sources["voice"] = voice_score > 0.3
         
-        # 3. 量表分数检测
+        # 3. 量表分数检测（已禁用）
         if self.config.ENABLE_SCALE_DETECTION:
-            try:
-                scores = scale_scores or self.scale_bridge.get_latest_scores(user_id)
-                scale_score = self._detect_scale(scores) if scores else 0.0
-                result.sources["scale"] = scale_score > 0.3
-            except Exception as e:
-                print(f"获取量表分数失败：{e}")
-                scale_score = 0.0
+            # 量表功能已移除，不再执行量表检测
+            scale_score = 0.0
         
         # 4. 情绪分析辅助
         try:
@@ -118,11 +112,18 @@ class CrisisDetector:
         return self.config.VOICE_NEGATIVE_SCORE if emotion in negative_emotions else self.config.VOICE_NEUTRAL_SCORE
     
     def _detect_scale(self, scores: dict) -> float:
-        """量表分数检测"""
+        """
+        量表分数检测（已废弃）
+
+        注意：量表功能已移除，此方法保留仅为向后兼容
+        实际不会被调用（ENABLE_SCALE_DETECTION = False）
+        """
         phq9 = scores.get("PHQ-9", 0)
-        if phq9 >= self.config.PHQ9_CRITICAL_SCORE:
+        # 注意：PHQ9_WARNING_SCORE和PHQ9_CRITICAL_SCORE配置已移除
+        # 此处使用硬编码的默认值
+        if phq9 >= 20:  # PHQ9_CRITICAL_SCORE
             return 0.9
-        elif phq9 >= self.config.PHQ9_WARNING_SCORE:
+        elif phq9 >= 10:  # PHQ9_WARNING_SCORE
             return 0.5
         return 0.1
     

@@ -84,3 +84,19 @@ test_*.py
 # 系统文件
 Thumbs.db
 desktop.ini
+
+# 文档文件（除根目录README.md和requirements.txt外）
+*.docx
+*.pdf
+*.zip
+*.rar
+*.7z
+
+# 排除特定的文档文件
+!/README.md
+!/requirements.txt
+
+# 忽略其他md文档和测试报告
+tests/results/*.md
+tests/论文*.md
+论文*.md
